@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aegis - Local Encrypted Vault</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body class="bg-dark">
+
+  <!-- Top App Navigation -->
+  <header class="app-header glass-card">
+    <div class="header-brand">
+      <div class="shield-logo">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="M12 8v4"/>
+          <path d="M12 16h.01"/>
+        </svg>
+      </div>
+      <div>
+        <h1 class="brand-title">Aegis <span class="badge-tag">Offline Vault</span></h1>
+        <p class="brand-subtitle">AES-256-GCM Zero-Knowledge Storage</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <div id="vaultStatusBadge" class="status-badge status-locked">
+        <span class="status-dot"></span>
+        <span id="statusText">Locked</span>
+      </div>
+      <button id="btnLock" class="btn btn-secondary hidden" onclick="lockVault()">
+        🔒 Lock Vault
+      </button>
+      <button id="btnSettings" class="btn btn-icon hidden" onclick="openSettingsModal()" title="Vault Settings & Export">
+        ⚙️
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="app-container">
+
+    <!-- Auth View (Lock / Setup Screen) -->
+    <section id="authSection" class="auth-wrapper glass-card">
+      <div class="auth-card">
+
+        <!-- Initial Create Setup Form -->
+        <div id="setupView" class="auth-view hidden">
+          <div class="icon-circle glow-cyan">🛡️</div>
+          <h2>Create Encrypted Vault</h2>
+          <p class="auth-desc">Set a master password to initialize your vault. Encrypted locally with zero-knowledge security.</p>
+
+          <form id="formInitVault" onsubmit="handleInitVault(event)">
+            <div class="form-group">
+              <label for="initPassword">Master Password</label>
+              <div class="password-input-group">
+                <input type="password" id="initPassword" placeholder="Minimum 6 characters..." required autocomplete="new-password" oninput="checkPasswordStrength(this.value)">
+                <button type="button" class="btn-toggle-pwd" onclick="togglePasswordVisibility('initPassword')">👁️</button>
+              </div>
+              <div class="strength-meter">
+                <div id="strengthBar" class="strength-bar"></div>
+              </div>
+              <span id="strengthText" class="strength-label">Password strength</span>
+            </div>
+
+            <div class="form-group">
+              <label for="confirmPassword">Confirm Master Password</label>
+              <input type="password" id="confirmPassword" placeholder="Re-enter master password..." required autocomplete="new-password">
+            </div>
+
+            <div class="info-alert">
+              ℹ️ <strong>100% Offline & Zero-Knowledge</strong>: Your files are encrypted locally with AES-256-GCM and stored strictly on your computer. Zero external cloud access.
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block">
+              🚀 Initialize Encrypted Vault
+            </button>
+          </form>
+        </div>
+
+        <!-- Unlock Vault Form -->
+        <div id="unlockView" class="auth-view hidden">
+          <div class="icon-circle glow-emerald">🔒</div>
+          <h2>Unlock Vault</h2>
+          <p class="auth-desc">Enter your master password to decrypt your stored files and notes in memory.</p>
+
+          <form id="formUnlockVault" onsubmit="handleUnlockVault(event)">
+            <div class="form-group">
+              <label for="unlockPassword">Master Password</label>
+              <div class="password-input-group">
+                <input type="password" id="unlockPassword" placeholder="Enter master password..." required autofocus autocomplete="current-password">
+                <button type="button" class="btn-toggle-pwd" onclick="togglePasswordVisibility('unlockPassword')">👁️</button>
+              </div>
+            </div>
+
+            <div id="unlockError" class="error-alert hidden"></div>
+
+            <button type="submit" class="btn btn-primary btn-block btn-lg">
+              🔓 Unlock Vault
+            </button>
+          </form>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Main Dashboard (Unlocked View) -->
+    <section id="dashboardSection" class="dashboard-wrapper hidden">
+
+      <!-- Stats Banner -->
+      <div class="stats-grid">
+        <div class="stat-card glass-card">
+          <div class="stat-icon">📦</div>
+          <div>
+            <div class="stat-value" id="statTotalItems">0</div>
+            <div class="stat-label">Stored Items</div>
+          </div>
+        </div>
+
+        <div class="stat-card glass-card">
+          <div class="stat-icon">💾</div>
+          <div>
+            <div class="stat-value" id="statTotalSize">0 KB</div>
+            <div class="stat-label">Vault Storage</div>
+          </div>
+        </div>
+
+        <div class="stat-card glass-card">
+          <div class="stat-icon">🔐</div>
+          <div>
+            <div class="stat-value">AES-256-GCM</div>
+            <div class="stat-label">Authenticated Cipher</div>
+          </div>
+        </div>
+
+        <div class="stat-card glass-card">
+          <div class="stat-icon">⌛</div>
+          <div>
+            <div class="stat-value" id="statAutoLock">15m</div>
+            <div class="stat-label">Auto-Lock Idle</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action & Toolbar -->
+      <div class="toolbar glass-card">
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="searchInput" placeholder="Search stored files, notes, credentials..." oninput="renderItems()">
+        </div>
+
+        <div class="category-filters" id="categoryFilters">
+          <button class="chip active" onclick="setCategoryFilter('All')">All</button>
+          <button class="chip" onclick="setCategoryFilter('Documents')">📄 Documents</button>
+          <button class="chip" onclick="setCategoryFilter('Notes')">📝 Notes</button>
+          <button class="chip" onclick="setCategoryFilter('Passwords')">🔑 Passwords</button>
+          <button class="chip" onclick="setCategoryFilter('Personal')">🔒 Personal</button>
+        </div>
+
+        <div class="action-buttons">
+          <button class="btn btn-primary" onclick="openUploadModal()">
+            📥 Encrypt File
+          </button>
+          <button class="btn btn-secondary" onclick="openNoteModal()">
+            ✍️ Add Note
+          </button>
+          <button class="btn btn-outline" onclick="openGeneratorModal()">
+            🎲 Generator
+          </button>
+        </div>
+      </div>
+
+      <!-- Items Grid -->
+      <div id="itemsContainer" class="items-grid">
+        <!-- Dynamically rendered items -->
+      </div>
+
+      <!-- Empty State -->
+      <div id="emptyState" class="empty-state glass-card hidden">
+        <div class="empty-icon">📂</div>
+        <h3>No Encrypted Items Found</h3>
+        <p>Your vault is ready! Encrypt your first document, confidential image, or secret note.</p>
+        <div class="empty-actions">
+          <button class="btn btn-primary" onclick="openUploadModal()">Encrypt a File</button>
+          <button class="btn btn-secondary" onclick="openNoteModal()">Create a Note</button>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Modal: Upload / Encrypt File -->
+  <div id="modalUpload" class="modal-overlay hidden" onclick="closeModalOnOverlay(event, 'modalUpload')">
+    <div class="modal-card glass-card">
+      <div class="modal-header">
+        <h3>📥 Encrypt & Store File</h3>
+        <button class="btn-close" onclick="closeModal('modalUpload')">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleFileDrop(event)">
+          <div class="drop-icon">📁</div>
+          <p><strong>Drag & drop a file here</strong> or click to browse</p>
+          <span class="drop-hint">Supports PDFs, images, documents, archives, code (Max 100MB)</span>
+          <input type="file" id="fileInput" class="hidden" onchange="handleFileSelect(event)">
+        </div>
+
+        <div id="selectedFileInfo" class="selected-file-info hidden">
+          <span class="file-badge">📄</span>
+          <div class="file-meta">
+            <div id="selectedFileName" class="file-name">filename.pdf</div>
+            <div id="selectedFileSize" class="file-size">0 KB</div>
+          </div>
+          <button class="btn-sm btn-danger" onclick="clearSelectedFile()">Clear</button>
+        </div>
+
+        <div class="form-group">
+          <label for="uploadCategory">Category</label>
+          <select id="uploadCategory">
+            <option value="Documents">📄 Documents</option>
+            <option value="Personal">🔒 Personal</option>
+            <option value="Finance">💰 Finance</option>
+            <option value="Work">💼 Work</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="uploadNotes">Description / Notes (Optional)</label>
+          <input type="text" id="uploadNotes" placeholder="Optional notes or tag...">
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modalUpload')">Cancel</button>
+        <button class="btn btn-primary" onclick="submitFileUpload()">🔒 Encrypt & Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Add Note / Credential -->
+  <div id="modalNote" class="modal-overlay hidden" onclick="closeModalOnOverlay(event, 'modalNote')">
+    <div class="modal-card glass-card">
+      <div class="modal-header">
+        <h3>✍️ Add Encrypted Secret Note</h3>
+        <button class="btn-close" onclick="closeModal('modalNote')">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="noteTitle">Title / Name</label>
+          <input type="text" id="noteTitle" placeholder="e.g. WiFi Password, Server API Key, Bank PINs">
+        </div>
+
+        <div class="form-group">
+          <label for="noteCategory">Category</label>
+          <select id="noteCategory">
+            <option value="Notes">📝 Secure Notes</option>
+            <option value="Passwords">🔑 Passwords & Credentials</option>
+            <option value="Finance">💰 Financial Info</option>
+            <option value="Personal">🔒 Personal</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="noteContent">Secret Content</label>
+          <textarea id="noteContent" rows="6" placeholder="Enter sensitive secret text, recovery codes, or credentials..."></textarea>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modalNote')">Cancel</button>
+        <button class="btn btn-primary" onclick="submitNoteSave()">🔒 Encrypt & Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Item Viewer / Reader -->
+  <div id="modalViewItem" class="modal-overlay hidden" onclick="closeModalOnOverlay(event, 'modalViewItem')">
+    <div class="modal-card glass-card modal-lg">
+      <div class="modal-header">
+        <h3 id="viewItemTitle">Item Details</h3>
+        <button class="btn-close" onclick="closeModal('modalViewItem')">✕</button>
+      </div>
+
+      <div class="modal-body" id="viewItemBody">
+        <!-- Item view content rendered dynamically -->
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-danger" id="btnDeleteItem">🗑️ Delete Item</button>
+        <button class="btn btn-secondary" onclick="closeModal('modalViewItem')">Close</button>
+        <a id="btnDownloadItem" class="btn btn-primary" download>⬇️ Download Decrypted</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Password Generator -->
+  <div id="modalGenerator" class="modal-overlay hidden" onclick="closeModalOnOverlay(event, 'modalGenerator')">
+    <div class="modal-card glass-card">
+      <div class="modal-header">
+        <h3>🎲 Password & Key Generator</h3>
+        <button class="btn-close" onclick="closeModal('modalGenerator')">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="gen-output-box">
+          <input type="text" id="genResult" readonly class="font-mono">
+          <button class="btn btn-secondary" onclick="copyGenPassword()">📋 Copy</button>
+        </div>
+
+        <div class="form-group">
+          <label>Length: <span id="lenValue">20</span> characters</label>
+          <input type="range" id="genLength" min="8" max="64" value="20" oninput="document.getElementById('lenValue').innerText = this.value; generatePassword();">
+        </div>
+
+        <div class="checkbox-group">
+          <label><input type="checkbox" id="chkUpper" checked onchange="generatePassword()"> Uppercase (A-Z)</label>
+          <label><input type="checkbox" id="chkLower" checked onchange="generatePassword()"> Lowercase (a-z)</label>
+          <label><input type="checkbox" id="chkNumbers" checked onchange="generatePassword()"> Numbers (0-9)</label>
+          <label><input type="checkbox" id="chkSymbols" checked onchange="generatePassword()"> Symbols (!@#$%^&*)</label>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="generatePassword()">🔄 Regenerate</button>
+        <button class="btn btn-primary" onclick="closeModal('modalGenerator')">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Vault Settings & Export -->
+  <div id="modalSettings" class="modal-overlay hidden" onclick="closeModalOnOverlay(event, 'modalSettings')">
+    <div class="modal-card glass-card">
+      <div class="modal-header">
+        <h3>⚙️ Vault Settings & Backup</h3>
+        <button class="btn-close" onclick="closeModal('modalSettings')">✕</button>
+      </div>
+
+      <div class="modal-body">
+
+
+        <div class="settings-block">
+          <h4>💾 Backup Encrypted Vault File</h4>
+          <p class="settings-desc">Export your encrypted <code>vault.vault</code> container file to an external USB drive or offline storage.</p>
+          <button class="btn btn-outline" onclick="downloadVaultBackup()">⬇️ Download vault.vault Backup</button>
+        </div>
+
+        <hr class="divider">
+
+        <div class="settings-block">
+          <h4>🔑 Change Master Password</h4>
+          <form id="formChangePassword" onsubmit="handleChangePassword(event)">
+            <div class="form-group">
+              <label for="currentPassword">Current Master Password</label>
+              <input type="password" id="currentPassword" required autocomplete="current-password">
+            </div>
+            <div class="form-group">
+              <label for="newPassword">New Master Password</label>
+              <input type="password" id="newPassword" required autocomplete="new-password">
+            </div>
+            <button type="submit" class="btn btn-primary">Update Master Password</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modalSettings')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
