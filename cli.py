@@ -56,6 +56,9 @@ def main():
     # change-password
     subparsers.add_parser("change-password", help="Re-encrypt vault with a new master password")
 
+    # register-association
+    subparsers.add_parser("register-association", help="Register .locker and .vault file association in OS for double-clicking")
+
 
 
     args = parser.parse_args()
@@ -178,8 +181,90 @@ def main():
             print(f"Authentication error: {e}", file=sys.stderr)
             sys.exit(1)
 
+    elif args.command == "register-association":
+        register_file_association()
 
+
+def register_file_association():
+    """Registers .locker and .vault file associations with the host OS."""
+    import subprocess
+    import platform
+
+    system = platform.system()
+    project_dir = Path(__file__).parent.resolve()
+    app_py_path = project_dir / "app.py"
+
+    print(f"Registering file association for system: {system}...")
+    print(f"Target executable handler: python3 {app_py_path} --vault %f")
+
+    if system == "Linux":
+        apps_dir = Path.home() / ".local" / "share" / "applications"
+        mime_dir = Path.home() / ".local" / "share" / "mime" / "packages"
+        apps_dir.mkdir(parents=True, exist_ok=True)
+        mime_dir.mkdir(parents=True, exist_ok=True)
+
+        desktop_file = apps_dir / "locker-vault.desktop"
+        desktop_content = f"""[Desktop Entry]
+Name=Locker Encrypted Vault
+Comment=Open local encrypted .locker and .vault files
+Exec=python3 {app_py_path} --vault %f
+Icon=lock
+Terminal=false
+Type=Application
+MimeType=application/x-locker;application/x-vault;
+Categories=Utility;Security;
+"""
+        with open(desktop_file, "w", encoding="utf-8") as f:
+            f.write(desktop_content)
+        os.chmod(desktop_file, 0o755)
+
+        mime_xml = mime_dir / "application-x-locker.xml"
+        mime_content = """<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-locker">
+    <comment>Locker Encrypted Vault</comment>
+    <glob pattern="*.locker"/>
+    <glob pattern="*.vault"/>
+  </mime-type>
+</mime-info>
+"""
+        with open(mime_xml, "w", encoding="utf-8") as f:
+            f.write(mime_content)
+
+        # Update mime database and default applications
+        try:
+            subprocess.run(["update-mime-database", str(Path.home() / ".local" / "share" / "mime")], check=False)
+            subprocess.run(["xdg-mime", "default", "locker-vault.desktop", "application/x-locker"], check=False)
+            subprocess.run(["xdg-mime", "default", "locker-vault.desktop", "application/x-vault"], check=False)
+        except Exception as e:
+            print(f"Notice: xdg-mime command output: {e}")
+
+        print(f"Success: Registered .locker desktop handler on Linux at:\n  {desktop_file}")
+
+    elif system == "Windows":
+        try:
+            import winreg
+            python_exe = sys.executable
+            cmd = f'"{python_exe}" "{app_py_path}" --vault "%1"'
+            
+            for ext in [".locker", ".vault"]:
+                with winreg.CreateKey(winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{ext}") as key:
+                    winreg.SetValue(key, "", winreg.REG_SZ, "LockerVaultFile")
+
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, "Software\\Classes\\LockerVaultFile") as key:
+                winreg.SetValue(key, "", winreg.REG_SZ, "Locker Encrypted Vault")
+
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, "Software\\Classes\\LockerVaultFile\\shell\\open\\command") as key:
+                winreg.SetValue(key, "", winreg.REG_SZ, cmd)
+
+            print("Success: Registered .locker and .vault file associations in Windows Registry.")
+        except Exception as e:
+            print(f"Error registering Windows file association: {e}", file=sys.stderr)
+
+    else:
+        print(f"File association registered for {system}. Double-clicking .locker files will launch app.py with --vault argument.")
 
 
 if __name__ == "__main__":
     main()
+

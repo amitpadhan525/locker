@@ -445,20 +445,194 @@ def launch_desktop_app_mode(url: str):
     return False
 
 
+def prompt_master_password_gui(vault_path: str, session_obj: VaultSession) -> bool:
+    """
+    Opens a native Tkinter modal dialog to unlock or initialize the specified vault.
+    Returns True if successfully unlocked/created, False if canceled or closed.
+    """
+    try:
+        import tkinter as tk
+    except ImportError:
+        print("Warning: tkinter is not installed. Cannot open native GUI prompt.")
+        return False
+
+    is_existing = os.path.exists(vault_path)
+    vault_name = os.path.basename(vault_path)
+    success = False
+
+    root = tk.Tk()
+    root.title(f"Locker - {'Unlock' if is_existing else 'Create'} Vault")
+    root.geometry("440x260")
+    root.resizable(False, False)
+    root.configure(bg="#0f172a")
+
+    # Center window on screen
+    root.update_idletasks()
+    width = root.winfo_width()
+    height = root.winfo_height()
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+    root.geometry(f'+{x}+{y}')
+
+    # Header
+    header_frame = tk.Frame(root, bg="#0f172a")
+    header_frame.pack(fill="x", padx=20, pady=(15, 5))
+
+    title_label = tk.Label(
+        header_frame,
+        text="🔐 Locker Vault",
+        font=("Helvetica", 14, "bold"),
+        fg="#06b6d4",
+        bg="#0f172a"
+    )
+    title_label.pack(anchor="w")
+
+    subtitle_text = f"Opening: {vault_name}" if is_existing else f"Initializing: {vault_name}"
+    sub_label = tk.Label(
+        header_frame,
+        text=subtitle_text,
+        font=("Helvetica", 9),
+        fg="#94a3b8",
+        bg="#0f172a"
+    )
+    sub_label.pack(anchor="w", pady=(2, 0))
+
+    # Form Container
+    form_frame = tk.Frame(root, bg="#1e293b", padx=15, pady=15)
+    form_frame.pack(fill="both", expand=True, padx=15, pady=5)
+
+    pwd_label_text = "Master Password:" if is_existing else "Set Master Password:"
+    pwd_label = tk.Label(
+        form_frame,
+        text=pwd_label_text,
+        font=("Helvetica", 10, "bold"),
+        fg="#f8fafc",
+        bg="#1e293b"
+    )
+    pwd_label.pack(anchor="w", pady=(0, 5))
+
+    pwd_entry = tk.Entry(
+        form_frame,
+        show="•",
+        font=("Helvetica", 11),
+        bg="#0f172a",
+        fg="#f8fafc",
+        insertbackground="#06b6d4",
+        relief="flat",
+        bd=4
+    )
+    pwd_entry.pack(fill="x", pady=(0, 5))
+    pwd_entry.focus_set()
+
+    error_label = tk.Label(
+        form_frame,
+        text="",
+        font=("Helvetica", 9),
+        fg="#f87171",
+        bg="#1e293b"
+    )
+    error_label.pack(anchor="w")
+
+    def on_submit(event=None):
+        nonlocal success
+        pwd = pwd_entry.get().strip()
+        if not pwd:
+            error_label.config(text="Password cannot be empty.", fg="#f87171")
+            return
+
+        error_label.config(text="Decrypting & Verifying...", fg="#38bdf8")
+        root.update()
+
+        try:
+            if is_existing:
+                session_obj.unlock(pwd)
+            else:
+                session_obj.create(pwd)
+            success = True
+            root.destroy()
+        except VaultSecurityError:
+            error_label.config(text="Incorrect password. Access denied.", fg="#f87171")
+            pwd_entry.delete(0, tk.END)
+        except Exception as err:
+            error_label.config(text=f"Error: {str(err)}", fg="#f87171")
+
+    pwd_entry.bind("<Return>", on_submit)
+
+    # Button Container
+    btn_frame = tk.Frame(root, bg="#0f172a", pady=10, padx=20)
+    btn_frame.pack(fill="x")
+
+    cancel_btn = tk.Button(
+        btn_frame,
+        text="Cancel",
+        command=root.destroy,
+        bg="#334155",
+        fg="#f8fafc",
+        activebackground="#475569",
+        activeforeground="#ffffff",
+        relief="flat",
+        padx=15,
+        pady=5,
+        cursor="hand2"
+    )
+    cancel_btn.pack(side="right", padx=(10, 0))
+
+    action_text = "Unlock" if is_existing else "Create & Unlock"
+    action_btn = tk.Button(
+        btn_frame,
+        text=action_text,
+        command=on_submit,
+        bg="#06b6d4",
+        fg="#0f172a",
+        font=("Helvetica", 10, "bold"),
+        activebackground="#0891b2",
+        activeforeground="#ffffff",
+        relief="flat",
+        padx=18,
+        pady=5,
+        cursor="hand2"
+    )
+    action_btn.pack(side="right")
+
+    root.mainloop()
+    return success
+
+
 def main():
-    server = ThreadingHTTPServer((HOST, PORT), VaultHTTPRequestHandler)
-    url = f"http://{HOST}:{PORT}"
+    import argparse
+    parser = argparse.ArgumentParser(description="Local Encrypted Storage Vault Server")
+    parser.add_argument("vault_file", nargs="?", default=None, help="Path to .locker or .vault file to open")
+    parser.add_argument("--vault", default=None, help="Path to .locker or .vault file")
+    parser.add_argument("--gui", action="store_true", help="Force native GUI password prompt")
+    parser.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")
+    parser.add_argument("--port", type=int, default=PORT, help="Port to run server on")
+
+    args = parser.parse_args()
+
+    target_vault = args.vault or args.vault_file
+    if target_vault:
+        session.vault_path = os.path.abspath(target_vault)
+        # Prompt password via native Tkinter GUI when opened with a file argument or --gui flag
+        print(f"Opening target vault file: {session.vault_path}")
+        unlocked = prompt_master_password_gui(session.vault_path, session)
+        if not unlocked:
+            print("Vault unlock canceled by user. Exiting.")
+            sys.exit(0)
+
+    server = ThreadingHTTPServer((HOST, args.port), VaultHTTPRequestHandler)
+    url = f"http://{HOST}:{args.port}"
 
     print("=" * 60)
     print("      LOCAL ENCRYPTED STORAGE VAULT (100% OFFLINE)")
     print("=" * 60)
+    print(f" Vault File: {session.vault_path}")
     print(f" Server running locally at: {url}")
     print(" Security: Zero cloud access, bound strictly to 127.0.0.1")
     print(" Press Ctrl+C to stop the vault server.")
     print("=" * 60)
 
     # Launch browser / app mode unless --no-browser flag is passed
-    if "--no-browser" not in sys.argv:
+    if not args.no_browser:
         launch_desktop_app_mode(url)
 
     try:
@@ -472,3 +646,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
