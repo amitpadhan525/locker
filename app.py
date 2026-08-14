@@ -14,7 +14,7 @@ import random
 import string
 import math
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -87,8 +87,8 @@ class LockerApp(tk.Tk):
         self.session = VaultSession(vault_path)
 
         self.title(f"Locker - Encrypted Storage Vault [{os.path.basename(self.session.vault_path)}]")
-        self.geometry("980x640")
-        self.minsize(800, 500)
+        self.geometry("1020x660")
+        self.minsize(840, 520)
         self.configure(bg="#0f172a")
 
         # Color Palette
@@ -139,6 +139,16 @@ class LockerApp(tk.Tk):
             borderwidth=0
         )
         style.map("Treeview", background=[("selected", self.colors["primary_dark"])], foreground=[("selected", "#ffffff")])
+
+    def make_modal(self, window: tk.Toplevel):
+        """Safely configures a Toplevel window as a modal dialog without grab errors."""
+        window.transient(self)
+        window.deiconify()
+        window.update_idletasks()
+        try:
+            window.grab_set()
+        except Exception:
+            pass
 
     def show_auth_screen(self):
         for widget in self.container.winfo_children():
@@ -390,7 +400,7 @@ class LockerApp(tk.Tk):
         self.tree.heading("date", text="Date Added")
 
         self.tree.column("fav", width=40, anchor="center")
-        self.tree.column("name", width=320, anchor="w")
+        self.tree.column("name", width=340, anchor="w")
         self.tree.column("type", width=80, anchor="center")
         self.tree.column("category", width=120, anchor="center")
         self.tree.column("size", width=100, anchor="center")
@@ -405,53 +415,83 @@ class LockerApp(tk.Tk):
         self.tree.bind("<Double-1>", lambda e: self.open_selected_item())
         self.tree.bind("<Return>", lambda e: self.open_selected_item())
 
-        # Action Bar (Bottom)
+        # Action Bar (Bottom - Dedicated Add Buttons)
         action_bar = tk.Frame(self.container, bg=self.colors["card"], padx=20, pady=10)
         action_bar.pack(fill="x")
 
+        # Left Add Options
         btn_add_file = tk.Button(
             action_bar,
-            text="📥 Encrypt File(s)",
-            command=self.handle_add_files,
-            font=("Helvetica", 10, "bold"),
+            text="📥 Encrypt File",
+            command=self.open_add_files_modal,
+            font=("Helvetica", 9, "bold"),
             bg=self.colors["primary"],
             fg=self.colors["bg"],
             activebackground=self.colors["primary_dark"],
-            relief="flat",
-            padx=14,
-            pady=6,
-            cursor="hand2"
-        )
-        btn_add_file.pack(side="left", padx=(0, 8))
-
-        btn_add_note = tk.Button(
-            action_bar,
-            text="✍️ Add Note",
-            command=self.open_add_note_modal,
-            font=("Helvetica", 10),
-            bg=self.colors["bg"],
-            fg=self.colors["text"],
-            relief="flat",
-            padx=14,
-            pady=6,
-            cursor="hand2"
-        )
-        btn_add_note.pack(side="left", padx=(0, 8))
-
-        btn_gen = tk.Button(
-            action_bar,
-            text="🎲 Generator",
-            command=self.open_generator_modal,
-            font=("Helvetica", 10),
-            bg=self.colors["bg"],
-            fg=self.colors["text"],
             relief="flat",
             padx=12,
             pady=6,
             cursor="hand2"
         )
+        btn_add_file.pack(side="left", padx=(0, 6))
+
+        btn_add_note = tk.Button(
+            action_bar,
+            text="✍️ Secret Note",
+            command=self.open_add_note_modal,
+            font=("Helvetica", 9),
+            bg=self.colors["bg"],
+            fg=self.colors["text"],
+            relief="flat",
+            padx=10,
+            pady=6,
+            cursor="hand2"
+        )
+        btn_add_note.pack(side="left", padx=(0, 6))
+
+        btn_add_pwd = tk.Button(
+            action_bar,
+            text="🔑 Add Password",
+            command=self.open_add_password_modal,
+            font=("Helvetica", 9),
+            bg=self.colors["bg"],
+            fg=self.colors["text"],
+            relief="flat",
+            padx=10,
+            pady=6,
+            cursor="hand2"
+        )
+        btn_add_pwd.pack(side="left", padx=(0, 6))
+
+        btn_add_other = tk.Button(
+            action_bar,
+            text="📁 Add Other",
+            command=self.open_add_other_modal,
+            font=("Helvetica", 9),
+            bg=self.colors["bg"],
+            fg=self.colors["text"],
+            relief="flat",
+            padx=10,
+            pady=6,
+            cursor="hand2"
+        )
+        btn_add_other.pack(side="left", padx=(0, 10))
+
+        btn_gen = tk.Button(
+            action_bar,
+            text="🎲 Generator",
+            command=self.open_generator_modal,
+            font=("Helvetica", 9),
+            bg=self.colors["bg"],
+            fg=self.colors["text"],
+            relief="flat",
+            padx=10,
+            pady=6,
+            cursor="hand2"
+        )
         btn_gen.pack(side="left", padx=(0, 15))
 
+        # Right Action Buttons
         btn_fav = tk.Button(
             action_bar,
             text="⭐ Favorite",
@@ -464,7 +504,7 @@ class LockerApp(tk.Tk):
             pady=6,
             cursor="hand2"
         )
-        btn_fav.pack(side="right", padx=(8, 0))
+        btn_fav.pack(side="right", padx=(6, 0))
 
         btn_delete = tk.Button(
             action_bar,
@@ -478,7 +518,7 @@ class LockerApp(tk.Tk):
             pady=6,
             cursor="hand2"
         )
-        btn_delete.pack(side="right", padx=(8, 0))
+        btn_delete.pack(side="right", padx=(6, 0))
 
         btn_extract = tk.Button(
             action_bar,
@@ -488,7 +528,7 @@ class LockerApp(tk.Tk):
             bg=self.colors["bg"],
             fg=self.colors["text"],
             relief="flat",
-            padx=12,
+            padx=10,
             pady=6,
             cursor="hand2"
         )
@@ -558,30 +598,110 @@ class LockerApp(tk.Tk):
         selected = self.tree.selection()
         return selected[0] if selected else None
 
-    def handle_add_files(self):
-        file_paths = filedialog.askopenfilenames(title="Select File(s) to Encrypt into Vault")
-        if not file_paths:
-            return
+    # --- MODALS & ADD OPTIONS ---
 
-        added_count = 0
-        for fp in file_paths:
-            try:
-                VaultCore.add_file_item(self.session.vault_data, fp, category="Documents")
-                added_count += 1
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to encrypt file {os.path.basename(fp)}: {e}")
+    def open_add_files_modal(self):
+        """Improved File Selector & Encryptor Modal UI."""
+        modal = tk.Toplevel(self)
+        modal.title("📥 Encrypt & Store File(s)")
+        modal.geometry("520x460")
+        modal.configure(bg=self.colors["bg"])
+        self.make_modal(modal)
 
-        if added_count > 0:
-            self.session.save()
-            self.refresh_items()
-            messagebox.showinfo("Success", f"Successfully encrypted and saved {added_count} file(s) into vault.")
+        lbl_hdr = tk.Label(modal, text="📥 Encrypt & Store Files into Vault", font=("Helvetica", 12, "bold"), fg=self.colors["primary"], bg=self.colors["bg"])
+        lbl_hdr.pack(anchor="w", padx=20, pady=(15, 2))
+
+        lbl_sub = tk.Label(modal, text="Select files to encrypt. Files are stored 100% offline inside your vault container.", font=("Helvetica", 9), fg=self.colors["muted"], bg=self.colors["bg"])
+        lbl_sub.pack(anchor="w", padx=20, pady=(0, 10))
+
+        selected_files: List[str] = []
+
+        # Files List Display Frame
+        list_frame = tk.Frame(modal, bg=self.colors["card"], padx=10, pady=10)
+        list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+
+        file_listbox = tk.Listbox(list_frame, font=("Helvetica", 9), bg=self.colors["card"], fg=self.colors["text"], selectbackground=self.colors["primary_dark"], bd=0)
+        file_listbox.pack(side="left", fill="both", expand=True)
+
+        sb = ttk.Scrollbar(list_frame, orient="vertical", command=file_listbox.yview)
+        file_listbox.config(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+
+        btn_bar = tk.Frame(modal, bg=self.colors["bg"])
+        btn_bar.pack(fill="x", padx=20, pady=(0, 10))
+
+        def browse_files():
+            fps = filedialog.askopenfilenames(title="Select File(s) to Encrypt", parent=modal)
+            for fp in fps:
+                if fp not in selected_files:
+                    selected_files.append(fp)
+                    size = os.path.getsize(fp)
+                    file_listbox.insert(tk.END, f"📄 {os.path.basename(fp)} ({self.format_size(size)})")
+
+        def remove_selected_file():
+            sel = file_listbox.curselection()
+            if sel:
+                idx = sel[0]
+                selected_files.pop(idx)
+                file_listbox.delete(idx)
+
+        btn_browse = tk.Button(btn_bar, text="📁 Browse File(s)...", command=browse_files, font=("Helvetica", 9, "bold"), bg=self.colors["card"], fg=self.colors["text"], relief="flat", padx=10, pady=4, cursor="hand2")
+        btn_browse.pack(side="left")
+
+        btn_rem = tk.Button(btn_bar, text="❌ Remove Selected", command=remove_selected_file, font=("Helvetica", 9), bg=self.colors["bg"], fg=self.colors["danger"], relief="flat", padx=10, pady=4, cursor="hand2")
+        btn_rem.pack(side="left", padx=10)
+
+        # Options Frame
+        opt_frame = tk.Frame(modal, bg=self.colors["bg"])
+        opt_frame.pack(fill="x", padx=20, pady=(0, 15))
+
+        lbl_cat = tk.Label(opt_frame, text="Category:", font=("Helvetica", 10, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_cat.grid(row=0, column=0, sticky="w", pady=(0, 5))
+
+        c_cat = ttk.Combobox(opt_frame, values=["Documents", "Work", "Personal", "Finance", "Media", "Archives", "Other"], state="readonly")
+        c_cat.set("Documents")
+        c_cat.grid(row=0, column=1, sticky="ew", padx=(10, 0), pady=(0, 5))
+
+        lbl_notes = tk.Label(opt_frame, text="Notes (Optional):", font=("Helvetica", 10, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_notes.grid(row=1, column=0, sticky="w", pady=(5, 0))
+
+        e_notes = tk.Entry(opt_frame, font=("Helvetica", 10), bg=self.colors["card"], fg=self.colors["text"], insertbackground=self.colors["primary"], bd=2)
+        e_notes.grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=(5, 0))
+
+        opt_frame.columnconfigure(1, weight=1)
+
+        def encrypt_and_save():
+            if not selected_files:
+                messagebox.showwarning("Warning", "Please select at least one file to encrypt.", parent=modal)
+                return
+
+            cat = c_cat.get()
+            notes = e_notes.get().strip()
+            added_count = 0
+
+            for fp in selected_files:
+                try:
+                    VaultCore.add_file_item(self.session.vault_data, fp, category=cat, notes=notes)
+                    added_count += 1
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to encrypt file {os.path.basename(fp)}: {e}", parent=modal)
+
+            if added_count > 0:
+                self.session.save()
+                self.refresh_items()
+                modal.destroy()
+                messagebox.showinfo("Success", f"Successfully encrypted and saved {added_count} file(s) into vault.")
+
+        btn_submit = tk.Button(modal, text="🔒 Encrypt & Save All Files", command=encrypt_and_save, font=("Helvetica", 10, "bold"), bg=self.colors["primary"], fg=self.colors["bg"], activebackground=self.colors["primary_dark"], relief="flat", pady=8, cursor="hand2")
+        btn_submit.pack(fill="x", padx=20, pady=(0, 15))
 
     def open_add_note_modal(self):
+        """Add Secret Note Modal Dialog."""
         modal = tk.Toplevel(self)
-        modal.title("Add Encrypted Secret Note")
+        modal.title("✍️ Add Secret Note")
         modal.geometry("460x380")
         modal.configure(bg=self.colors["bg"])
-        modal.grab_set()
+        self.make_modal(modal)
 
         lbl_t = tk.Label(modal, text="Title / Name:", font=("Helvetica", 10, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
         lbl_t.pack(anchor="w", padx=20, pady=(15, 4))
@@ -592,7 +712,7 @@ class LockerApp(tk.Tk):
         lbl_c = tk.Label(modal, text="Category:", font=("Helvetica", 10, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
         lbl_c.pack(anchor="w", padx=20, pady=(10, 4))
 
-        c_cat = ttk.Combobox(modal, values=["Notes", "Passwords", "Finance", "Personal"], state="readonly")
+        c_cat = ttk.Combobox(modal, values=["Notes", "Personal", "Work", "Finance", "Other"], state="readonly")
         c_cat.set("Notes")
         c_cat.pack(fill="x", padx=20)
 
@@ -616,7 +736,132 @@ class LockerApp(tk.Tk):
             modal.destroy()
             messagebox.showinfo("Success", "Secret note encrypted and saved successfully.")
 
-        btn_save = tk.Button(modal, text="🔒 Encrypt & Save", command=save_note, font=("Helvetica", 10, "bold"), bg=self.colors["primary"], fg=self.colors["bg"], relief="flat", pady=6)
+        btn_save = tk.Button(modal, text="🔒 Encrypt & Save Note", command=save_note, font=("Helvetica", 10, "bold"), bg=self.colors["primary"], fg=self.colors["bg"], activebackground=self.colors["primary_dark"], relief="flat", pady=7, cursor="hand2")
+        btn_save.pack(fill="x", padx=20, pady=(0, 15))
+
+    def open_add_password_modal(self):
+        """Add Password / Credential Item Modal Dialog."""
+        modal = tk.Toplevel(self)
+        modal.title("🔑 Add Password / Credential")
+        modal.geometry("480x440")
+        modal.configure(bg=self.colors["bg"])
+        self.make_modal(modal)
+
+        lbl_h = tk.Label(modal, text="🔑 Add Encrypted Password", font=("Helvetica", 12, "bold"), fg=self.colors["primary"], bg=self.colors["bg"])
+        lbl_h.pack(anchor="w", padx=20, pady=(15, 10))
+
+        # Title / Service
+        lbl_t = tk.Label(modal, text="Service / Account Name (e.g. Google, GitHub):", font=("Helvetica", 9, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_t.pack(anchor="w", padx=20, pady=(5, 2))
+        e_title = tk.Entry(modal, font=("Helvetica", 10), bg=self.colors["card"], fg=self.colors["text"], insertbackground=self.colors["primary"], bd=2)
+        e_title.pack(fill="x", padx=20, pady=(0, 8))
+
+        # Username / Email
+        lbl_u = tk.Label(modal, text="Username / Email:", font=("Helvetica", 9, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_u.pack(anchor="w", padx=20, pady=(0, 2))
+        e_user = tk.Entry(modal, font=("Helvetica", 10), bg=self.colors["card"], fg=self.colors["text"], insertbackground=self.colors["primary"], bd=2)
+        e_user.pack(fill="x", padx=20, pady=(0, 8))
+
+        # Password Frame with Generate button
+        lbl_p = tk.Label(modal, text="Password:", font=("Helvetica", 9, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_p.pack(anchor="w", padx=20, pady=(0, 2))
+
+        p_frame = tk.Frame(modal, bg=self.colors["bg"])
+        p_frame.pack(fill="x", padx=20, pady=(0, 8))
+
+        e_pwd = tk.Entry(p_frame, font=("Helvetica", 10), bg=self.colors["card"], fg=self.colors["text"], insertbackground=self.colors["primary"], bd=2)
+        e_pwd.pack(side="left", fill="x", expand=True)
+
+        def quick_gen():
+            chars = string.ascii_letters + string.digits + "!@#$%^&*"
+            pwd = "".join(random.choice(chars) for _ in range(20))
+            e_pwd.delete(0, tk.END)
+            e_pwd.insert(0, pwd)
+
+        btn_gen = tk.Button(p_frame, text="🎲 Generate", command=quick_gen, font=("Helvetica", 9), bg=self.colors["card"], fg=self.colors["primary"], relief="flat", padx=8, pady=2, cursor="hand2")
+        btn_gen.pack(side="right", padx=(5, 0))
+
+        # URL / Website
+        lbl_url = tk.Label(modal, text="Website URL (Optional):", font=("Helvetica", 9, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_url.pack(anchor="w", padx=20, pady=(0, 2))
+        e_url = tk.Entry(modal, font=("Helvetica", 10), bg=self.colors["card"], fg=self.colors["text"], insertbackground=self.colors["primary"], bd=2)
+        e_url.pack(fill="x", padx=20, pady=(0, 8))
+
+        # Notes
+        lbl_n = tk.Label(modal, text="Notes / Security Answers (Optional):", font=("Helvetica", 9, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_n.pack(anchor="w", padx=20, pady=(0, 2))
+        e_notes = tk.Entry(modal, font=("Helvetica", 10), bg=self.colors["card"], fg=self.colors["text"], insertbackground=self.colors["primary"], bd=2)
+        e_notes.pack(fill="x", padx=20, pady=(0, 15))
+
+        def save_password_credential():
+            title = e_title.get().strip()
+            user = e_user.get().strip()
+            pwd = e_pwd.get().strip()
+            url = e_url.get().strip()
+            notes = e_notes.get().strip()
+
+            if not title or not pwd:
+                messagebox.showwarning("Warning", "Title and password are required.", parent=modal)
+                return
+
+            content = f"Username: {user}\nPassword: {pwd}"
+            if url:
+                content += f"\nURL: {url}"
+            if notes:
+                content += f"\nNotes: {notes}"
+
+            VaultCore.add_note_item(self.session.vault_data, title, content, category="Passwords")
+            self.session.save()
+            self.refresh_items()
+            modal.destroy()
+            messagebox.showinfo("Success", "Password credential encrypted and saved successfully.")
+
+        btn_save = tk.Button(modal, text="🔒 Save Encrypted Password", command=save_password_credential, font=("Helvetica", 10, "bold"), bg=self.colors["primary"], fg=self.colors["bg"], activebackground=self.colors["primary_dark"], relief="flat", pady=7, cursor="hand2")
+        btn_save.pack(fill="x", padx=20, pady=(0, 15))
+
+    def open_add_other_modal(self):
+        """Add Other Custom Secure Item Modal Dialog."""
+        modal = tk.Toplevel(self)
+        modal.title("📁 Add Other Secure Item")
+        modal.geometry("460x400")
+        modal.configure(bg=self.colors["bg"])
+        self.make_modal(modal)
+
+        lbl_h = tk.Label(modal, text="📁 Add Custom Secure Item", font=("Helvetica", 12, "bold"), fg=self.colors["primary"], bg=self.colors["bg"])
+        lbl_h.pack(anchor="w", padx=20, pady=(15, 10))
+
+        lbl_t = tk.Label(modal, text="Item Title / Name (e.g. Credit Card, API Key, License):", font=("Helvetica", 9, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_t.pack(anchor="w", padx=20, pady=(0, 2))
+        e_title = tk.Entry(modal, font=("Helvetica", 10), bg=self.colors["card"], fg=self.colors["text"], insertbackground=self.colors["primary"], bd=2)
+        e_title.pack(fill="x", padx=20, pady=(0, 8))
+
+        lbl_c = tk.Label(modal, text="Category:", font=("Helvetica", 9, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_c.pack(anchor="w", padx=20, pady=(0, 2))
+        c_cat = ttk.Combobox(modal, values=["Personal", "Finance", "Documents", "Notes", "Other"], state="readonly")
+        c_cat.set("Personal")
+        c_cat.pack(fill="x", padx=20, pady=(0, 8))
+
+        lbl_det = tk.Label(modal, text="Item Secret Details / Data:", font=("Helvetica", 9, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_det.pack(anchor="w", padx=20, pady=(0, 2))
+        t_det = tk.Text(modal, height=8, font=("Helvetica", 10), bg=self.colors["card"], fg=self.colors["text"], insertbackground=self.colors["primary"], bd=2)
+        t_det.pack(fill="both", expand=True, padx=20, pady=(0, 15))
+
+        def save_other():
+            title = e_title.get().strip()
+            content = t_det.get("1.0", tk.END).strip()
+            cat = c_cat.get()
+
+            if not title or not content:
+                messagebox.showwarning("Warning", "Title and details cannot be empty.", parent=modal)
+                return
+
+            VaultCore.add_note_item(self.session.vault_data, title, content, category=cat)
+            self.session.save()
+            self.refresh_items()
+            modal.destroy()
+            messagebox.showinfo("Success", "Custom item encrypted and saved successfully.")
+
+        btn_save = tk.Button(modal, text="🔒 Save Encrypted Item", command=save_other, font=("Helvetica", 10, "bold"), bg=self.colors["primary"], fg=self.colors["bg"], activebackground=self.colors["primary_dark"], relief="flat", pady=7, cursor="hand2")
         btn_save.pack(fill="x", padx=20, pady=(0, 15))
 
     def open_selected_item(self):
@@ -632,7 +877,7 @@ class LockerApp(tk.Tk):
         modal.title(f"View Item - {item.get('name')}")
         modal.geometry("520x420")
         modal.configure(bg=self.colors["bg"])
-        modal.grab_set()
+        self.make_modal(modal)
 
         lbl_t = tk.Label(modal, text=item.get("name"), font=("Helvetica", 12, "bold"), fg=self.colors["primary"], bg=self.colors["bg"])
         lbl_t.pack(anchor="w", padx=20, pady=(15, 2))
@@ -659,11 +904,11 @@ class LockerApp(tk.Tk):
             self.clipboard_append(text)
             messagebox.showinfo("Copied", "Content copied to clipboard!", parent=modal)
 
-        btn_copy = tk.Button(btn_frame, text="📋 Copy", command=copy_to_clipboard, bg=self.colors["card"], fg=self.colors["text"], relief="flat", padx=12, pady=4)
+        btn_copy = tk.Button(btn_frame, text="📋 Copy Content", command=copy_to_clipboard, bg=self.colors["card"], fg=self.colors["text"], relief="flat", padx=12, pady=4, cursor="hand2")
         btn_copy.pack(side="left")
 
         if item.get("type") == "file":
-            btn_dl = tk.Button(btn_frame, text="⬇️ Save Decrypted File", command=lambda: self.extract_item_by_id(item_id), bg=self.colors["primary"], fg=self.colors["bg"], relief="flat", padx=12, pady=4)
+            btn_dl = tk.Button(btn_frame, text="⬇️ Save Decrypted File", command=lambda: self.extract_item_by_id(item_id), bg=self.colors["primary"], fg=self.colors["bg"], relief="flat", padx=12, pady=4, cursor="hand2")
             btn_dl.pack(side="right")
 
     def toggle_favorite_selected(self):
@@ -722,7 +967,7 @@ class LockerApp(tk.Tk):
         modal.title("Password & Key Generator")
         modal.geometry("420x340")
         modal.configure(bg=self.colors["bg"])
-        modal.grab_set()
+        self.make_modal(modal)
 
         lbl_out = tk.Label(modal, text="Generated Password:", font=("Helvetica", 10, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
         lbl_out.pack(anchor="w", padx=20, pady=(15, 4))
@@ -750,7 +995,7 @@ class LockerApp(tk.Tk):
         scale_len.config(command=lambda e: generate())
         generate()
 
-        btn_copy = tk.Button(modal, text="📋 Copy Password", command=lambda: (self.clipboard_clear(), self.clipboard_append(e_res.get()), messagebox.showinfo("Copied", "Password copied!")), font=("Helvetica", 10, "bold"), bg=self.colors["primary"], fg=self.colors["bg"], relief="flat", pady=6)
+        btn_copy = tk.Button(modal, text="📋 Copy Password", command=lambda: (self.clipboard_clear(), self.clipboard_append(e_res.get()), messagebox.showinfo("Copied", "Password copied!")), font=("Helvetica", 10, "bold"), bg=self.colors["primary"], fg=self.colors["bg"], relief="flat", pady=6, cursor="hand2")
         btn_copy.pack(fill="x", padx=20, pady=15)
 
     def open_settings_modal(self):
@@ -758,7 +1003,7 @@ class LockerApp(tk.Tk):
         modal.title("Vault Settings & Backup")
         modal.geometry("450x300")
         modal.configure(bg=self.colors["bg"])
-        modal.grab_set()
+        self.make_modal(modal)
 
         lbl_h = tk.Label(modal, text="⚙️ Vault Settings", font=("Helvetica", 12, "bold"), fg=self.colors["primary"], bg=self.colors["bg"])
         lbl_h.pack(anchor="w", padx=20, pady=(15, 10))
@@ -770,7 +1015,7 @@ class LockerApp(tk.Tk):
                 shutil.copy(self.session.vault_path, out_path)
                 messagebox.showinfo("Backup Success", f"Vault file backed up to:\n{out_path}", parent=modal)
 
-        btn_bk = tk.Button(modal, text="💾 Export Backup Vault Container", command=backup_vault, bg=self.colors["card"], fg=self.colors["text"], relief="flat", padx=12, pady=6)
+        btn_bk = tk.Button(modal, text="💾 Export Backup Vault Container", command=backup_vault, bg=self.colors["card"], fg=self.colors["text"], relief="flat", padx=12, pady=6, cursor="hand2")
         btn_bk.pack(fill="x", padx=20, pady=10)
 
     def lock_vault(self):
