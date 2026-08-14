@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
-import os
+"""
+Locker - Encrypted Storage Vault
+100% Offline, Native Desktop GUI Application (Tkinter/TTK)
+Zero Cloud Access, Zero HTTP Server, Zero Open Ports.
+"""
+
 import sys
-import json
+import os
 import time
+import json
 import base64
-import urllib.parse
-import webbrowser
-import subprocess
+import random
+import string
+import math
 from pathlib import Path
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Optional, Dict, Any
 
-from vault_core import VaultCore, VaultSecurityError, DEFAULT_VAULT_FILE
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
 
-PORT = 5000
-HOST = "127.0.0.1"
+from vault_core import VaultCore, VaultSecurityError, DEFAULT_VAULT_FILE
 
 
 class VaultSession:
     """In-memory session holding active unlocked vault state with auto-lock."""
     def __init__(self, vault_path: str = DEFAULT_VAULT_FILE):
-        self.vault_path = vault_path
+        self.vault_path = os.path.abspath(vault_path)
         self.master_key: Optional[bytes] = None
         self.salt: Optional[bytes] = None
         self.kdf_type: Optional[int] = None
@@ -34,7 +39,6 @@ class VaultSession:
     def is_unlocked(self) -> bool:
         if self.master_key is None or self.vault_data is None:
             return False
-        # Check auto lock timeout
         if time.time() - self.last_activity > self.auto_lock_seconds:
             self.lock()
             return False
@@ -75,575 +79,717 @@ class VaultSession:
         self.touch()
 
 
-session = VaultSession()
-
-
-class VaultHTTPRequestHandler(BaseHTTPRequestHandler):
-
-    def log_message(self, format, *args):
-        # Silence default verbose log output
-        pass
-
-    def send_json(self, status_code: int, data: Dict[str, Any]):
-        body = json.dumps(data, ensure_ascii=False).encode('utf-8')
-        self.send_response(status_code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def send_error_json(self, status_code: int, message: str):
-        self.send_json(status_code, {"error": message, "success": False})
-
-    def serve_static(self, rel_path: str):
-        static_dir = Path(__file__).parent / "static"
-        target_path = (static_dir / rel_path.lstrip("/")).resolve()
-
-        # Prevent path traversal
-        if not str(target_path).startswith(str(static_dir.resolve())):
-            self.send_error_json(403, "Access denied")
-            return
-
-        if not target_path.exists() or target_path.is_dir():
-            target_path = static_dir / "index.html"
-
-        ext = target_path.suffix.lower()
-        content_type = {
-            ".html": "text/html; charset=utf-8",
-            ".css": "text/css; charset=utf-8",
-            ".js": "application/javascript; charset=utf-8",
-            ".json": "application/json",
-            ".png": "image/png",
-            ".svg": "image/svg+xml",
-            ".ico": "image/x-icon"
-        }.get(ext, "application/octet-stream")
-
-        with open(target_path, "rb") as f:
-            content = f.read()
-
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(content)))
-        self.end_headers()
-        self.wfile.write(content)
-
-    def do_GET(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path
-
-        if path.startswith("/api/"):
-            self.handle_api_get(path, parsed.query)
-        else:
-            rel = "index.html" if path in ("/", "") else path
-            self.serve_static(rel)
-
-    def do_POST(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path
-
-        content_len = int(self.headers.get("Content-Length", 0))
-        raw_body = self.rfile.read(content_len) if content_len > 0 else b""
-
-        body_json = {}
-        if raw_body:
-            try:
-                body_json = json.loads(raw_body.decode('utf-8'))
-            except Exception:
-                pass
-
-        self.handle_api_post(path, body_json, raw_body)
-
-    def do_DELETE(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path
-        if path.startswith("/api/item/"):
-            item_id = path.replace("/api/item/", "")
-            self.handle_delete_item(item_id)
-        else:
-            self.send_error_json(404, "Endpoint not found")
-
-    def handle_api_get(self, path: str, query_str: str):
-        if path == "/api/status":
-            unlocked = session.is_unlocked()
-            item_count = 0
-            if unlocked and session.vault_data:
-                item_count = len(session.vault_data.get("items", {}))
-
-            self.send_json(200, {
-                "initialized": session.is_initialized(),
-                "unlocked": unlocked,
-                "item_count": item_count,
-                "vault_path": session.vault_path,
-                "success": True
-            })
-
-        elif path == "/api/items":
-            if not session.is_unlocked():
-                self.send_error_json(401, "Vault is locked")
-                return
-
-            items_list = []
-            category_counts = {"All": 0, "Favorites": 0, "Documents": 0, "Notes": 0, "Passwords": 0, "Personal": 0}
-            for item_id, item in session.vault_data.get("items", {}).items():
-                is_fav = item.get("favorite", False)
-                cat = item.get("category", "Documents")
-                
-                category_counts["All"] += 1
-                if is_fav:
-                    category_counts["Favorites"] += 1
-                if cat in category_counts:
-                    category_counts[cat] += 1
-                else:
-                    category_counts[cat] = 1
-
-                items_list.append({
-                    "id": item.get("id"),
-                    "type": item.get("type"),
-                    "name": item.get("name"),
-                    "category": cat,
-                    "mime_type": item.get("mime_type"),
-                    "size": item.get("size", 0),
-                    "created_at": item.get("created_at"),
-                    "updated_at": item.get("updated_at"),
-                    "notes": item.get("notes", ""),
-                    "favorite": is_fav
-                })
-
-            # Sort by created_at descending
-            items_list.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-            self.send_json(200, {"items": items_list, "counts": category_counts, "success": True})
-
-        elif path.startswith("/api/item/"):
-            if not session.is_unlocked():
-                self.send_error_json(401, "Vault is locked")
-                return
-
-            item_id = path.replace("/api/item/", "")
-            item = session.vault_data.get("items", {}).get(item_id)
-            if not item:
-                self.send_error_json(404, "Item not found")
-                return
-
-            self.send_json(200, {"item": item, "success": True})
-
-        elif path.startswith("/api/download/"):
-            if not session.is_unlocked():
-                self.send_error_json(401, "Vault is locked")
-                return
-
-            item_id = path.replace("/api/download/", "")
-            item = session.vault_data.get("items", {}).get(item_id)
-            if not item:
-                self.send_error_json(404, "Item not found")
-                return
-
-            fname, raw_bytes = VaultCore.extract_item_data(item)
-            mime = item.get("mime_type", "application/octet-stream")
-
-            self.send_response(200)
-            self.send_header("Content-Type", mime)
-            self.send_header("Content-Disposition", f'attachment; filename="{urllib.parse.quote(fname)}"')
-            self.send_header("Content-Length", str(len(raw_bytes)))
-            self.end_headers()
-            self.wfile.write(raw_bytes)
-
-        elif path == "/api/export":
-            if not session.is_unlocked():
-                self.send_error_json(401, "Vault is locked")
-                return
-
-            if not os.path.exists(session.vault_path):
-                self.send_error_json(404, "Vault file not found")
-                return
-
-            with open(session.vault_path, "rb") as f:
-                content = f.read()
-
-            self.send_response(200)
-            self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("Content-Disposition", f'attachment; filename="backup_{os.path.basename(session.vault_path)}"')
-            self.send_header("Content-Length", str(len(content)))
-            self.end_headers()
-            self.wfile.write(content)
-
-        else:
-            self.send_error_json(404, "Endpoint not found")
-
-    def handle_api_post(self, path: str, body: Dict[str, Any], raw_body: bytes):
-        if path == "/api/init":
-            password = body.get("password", "")
-            if not password:
-                self.send_error_json(400, "Password required")
-                return
-            try:
-                session.create(password)
-                self.send_json(200, {"message": "Vault created successfully", "success": True})
-            except Exception as e:
-                self.send_error_json(400, str(e))
-
-        elif path == "/api/unlock":
-            password = body.get("password", "")
-            if not password:
-                self.send_error_json(400, "Password required")
-                return
-            try:
-                session.unlock(password)
-                self.send_json(200, {"message": "Vault unlocked", "success": True})
-            except VaultSecurityError as e:
-                self.send_error_json(401, str(e))
-            except Exception as e:
-                self.send_error_json(400, str(e))
-
-        elif path == "/api/lock":
-            session.lock()
-            self.send_json(200, {"message": "Vault locked", "success": True})
-
-        elif path == "/api/upload":
-            if not session.is_unlocked():
-                self.send_error_json(401, "Vault is locked")
-                return
-
-            filename = body.get("filename", "file.bin")
-            b64_data = body.get("data_b64", "")
-            category = body.get("category", "Documents")
-            notes = body.get("notes", "")
-            mime_type = body.get("mime_type", "application/octet-stream")
-
-            if not b64_data:
-                self.send_error_json(400, "File content missing")
-                return
-
-            try:
-                file_bytes = base64.b64decode(b64_data.encode('utf-8'))
-                item_id = VaultCore.add_file_item(session.vault_data, filename, file_bytes, category=category, notes=notes, mime_type=mime_type)
-                session.save()
-                self.send_json(200, {"item_id": item_id, "message": "File encrypted and stored", "success": True})
-            except Exception as e:
-                self.send_error_json(500, f"Error saving file: {e}")
-
-        elif path == "/api/note":
-            if not session.is_unlocked():
-                self.send_error_json(401, "Vault is locked")
-                return
-
-            title = body.get("title", "")
-            content = body.get("content", "")
-            category = body.get("category", "Notes")
-            notes = body.get("notes", "")
-
-            if not title or not content:
-                self.send_error_json(400, "Title and content required")
-                return
-
-            try:
-                item_id = VaultCore.add_note_item(session.vault_data, title, content, category=category, notes=notes)
-                session.save()
-                self.send_json(200, {"item_id": item_id, "message": "Note encrypted and saved", "success": True})
-            except Exception as e:
-                self.send_error_json(500, f"Error saving note: {e}")
-
-        elif path == "/api/favorite":
-            if not session.is_unlocked():
-                self.send_error_json(401, "Vault is locked")
-                return
-
-            item_id = body.get("item_id", "")
-            if not item_id:
-                self.send_error_json(400, "Item ID required")
-                return
-
-            is_fav = VaultCore.toggle_favorite(session.vault_data, item_id)
-            session.save()
-            self.send_json(200, {"item_id": item_id, "favorite": is_fav, "message": "Favorite updated", "success": True})
-
-        elif path == "/api/batch-upload":
-            if not session.is_unlocked():
-                self.send_error_json(401, "Vault is locked")
-                return
-
-            files = body.get("files", [])
-            if not files or not isinstance(files, list):
-                self.send_error_json(400, "Files array required")
-                return
-
-            added_ids = []
-            try:
-                for file_info in files:
-                    filename = file_info.get("filename", "file.bin")
-                    b64_data = file_info.get("data_b64", "")
-                    category = file_info.get("category", "Documents")
-                    notes = file_info.get("notes", "")
-                    mime_type = file_info.get("mime_type", "application/octet-stream")
-
-                    if b64_data:
-                        file_bytes = base64.b64decode(b64_data.encode('utf-8'))
-                        item_id = VaultCore.add_file_item(session.vault_data, filename, file_bytes, category=category, notes=notes, mime_type=mime_type)
-                        added_ids.append(item_id)
-
-                session.save()
-                self.send_json(200, {"added_count": len(added_ids), "item_ids": added_ids, "message": f"{len(added_ids)} files encrypted & stored", "success": True})
-            except Exception as e:
-                self.send_error_json(500, f"Error processing batch upload: {e}")
-
-        elif path == "/api/change-password":
-            if not session.is_unlocked():
-                self.send_error_json(401, "Vault is locked")
-                return
-
-            old_pwd = body.get("old_password", "")
-            new_pwd = body.get("new_password", "")
-
-            if not old_pwd or not new_pwd:
-                self.send_error_json(400, "Both current and new passwords are required")
-                return
-
-            try:
-                master_key, salt, kdf_type, vault_data = VaultCore.change_password(session.vault_path, old_pwd, new_pwd)
-                session.master_key = master_key
-                session.salt = salt
-                session.kdf_type = kdf_type
-                session.vault_data = vault_data
-                session.touch()
-                self.send_json(200, {"message": "Password changed successfully", "success": True})
-            except VaultSecurityError as e:
-                self.send_error_json(401, str(e))
-            except Exception as e:
-                self.send_error_json(500, str(e))
-
-        else:
-            self.send_error_json(404, "Endpoint not found")
-
-    def handle_delete_item(self, item_id: str):
-        if not session.is_unlocked():
-            self.send_error_json(401, "Vault is locked")
-            return
-
-        if VaultCore.delete_item(session.vault_data, item_id):
-            session.save()
-            self.send_json(200, {"message": "Item deleted", "success": True})
-        else:
-            self.send_error_json(404, "Item not found")
-
-
-def launch_desktop_app_mode(url: str):
-    """Attempts to launch Chromium/Chrome/Edge in standalone App Mode window."""
-    browsers = ["google-chrome", "chromium-browser", "chromium", "microsoft-edge", "chrome"]
-    for browser_cmd in browsers:
-        try:
-            res = subprocess.run(["which", browser_cmd], capture_output=True, text=True)
-            if res.returncode == 0:
-                print(f"Launching standalone app mode using '{browser_cmd}'...")
-                subprocess.Popen([browser_cmd, f"--app={url}", "--name=EncryptedVault"])
-                return True
-        except Exception:
-            pass
-
-    # Fallback to standard web browser
-    print("Opening in default browser...")
-    webbrowser.open(url)
-    return False
-
-
-def prompt_master_password_gui(vault_path: str, session_obj: VaultSession) -> bool:
-    """
-    Opens a native Tkinter modal dialog to unlock or initialize the specified vault.
-    Returns True if successfully unlocked/created, False if canceled or closed.
-    """
-    try:
-        import tkinter as tk
-    except ImportError:
-        print("Warning: tkinter is not installed. Cannot open native GUI prompt.")
-        return False
-
-    is_existing = os.path.exists(vault_path)
-    vault_name = os.path.basename(vault_path)
-    success = False
-
-    root = tk.Tk()
-    root.title(f"Locker - {'Unlock' if is_existing else 'Create'} Vault")
-    root.geometry("440x260")
-    root.resizable(False, False)
-    root.configure(bg="#0f172a")
-
-    # Center window on screen
-    root.update_idletasks()
-    width = root.winfo_width()
-    height = root.winfo_height()
-    x = (root.winfo_screenwidth() // 2) - (width // 2)
-    y = (root.winfo_screenheight() // 2) - (height // 2)
-    root.geometry(f'+{x}+{y}')
-
-    # Header
-    header_frame = tk.Frame(root, bg="#0f172a")
-    header_frame.pack(fill="x", padx=20, pady=(15, 5))
-
-    title_label = tk.Label(
-        header_frame,
-        text="🔐 Locker Vault",
-        font=("Helvetica", 14, "bold"),
-        fg="#06b6d4",
-        bg="#0f172a"
-    )
-    title_label.pack(anchor="w")
-
-    subtitle_text = f"Opening: {vault_name}" if is_existing else f"Initializing: {vault_name}"
-    sub_label = tk.Label(
-        header_frame,
-        text=subtitle_text,
-        font=("Helvetica", 9),
-        fg="#94a3b8",
-        bg="#0f172a"
-    )
-    sub_label.pack(anchor="w", pady=(2, 0))
-
-    # Form Container
-    form_frame = tk.Frame(root, bg="#1e293b", padx=15, pady=15)
-    form_frame.pack(fill="both", expand=True, padx=15, pady=5)
-
-    pwd_label_text = "Master Password:" if is_existing else "Set Master Password:"
-    pwd_label = tk.Label(
-        form_frame,
-        text=pwd_label_text,
-        font=("Helvetica", 10, "bold"),
-        fg="#f8fafc",
-        bg="#1e293b"
-    )
-    pwd_label.pack(anchor="w", pady=(0, 5))
-
-    pwd_entry = tk.Entry(
-        form_frame,
-        show="•",
-        font=("Helvetica", 11),
-        bg="#0f172a",
-        fg="#f8fafc",
-        insertbackground="#06b6d4",
-        relief="flat",
-        bd=4
-    )
-    pwd_entry.pack(fill="x", pady=(0, 5))
-    pwd_entry.focus_set()
-
-    error_label = tk.Label(
-        form_frame,
-        text="",
-        font=("Helvetica", 9),
-        fg="#f87171",
-        bg="#1e293b"
-    )
-    error_label.pack(anchor="w")
-
-    def on_submit(event=None):
-        nonlocal success
-        pwd = pwd_entry.get().strip()
+class LockerApp(tk.Tk):
+    """Native Desktop GUI Application for Locker Encrypted Storage Vault."""
+
+    def __init__(self, vault_path: str = DEFAULT_VAULT_FILE):
+        super().__init__()
+        self.session = VaultSession(vault_path)
+
+        self.title(f"Locker - Encrypted Storage Vault [{os.path.basename(self.session.vault_path)}]")
+        self.geometry("980x640")
+        self.minsize(800, 500)
+        self.configure(bg="#0f172a")
+
+        # Color Palette
+        self.colors = {
+            "bg": "#0f172a",
+            "card": "#1e293b",
+            "card_hover": "#334155",
+            "primary": "#06b6d4",
+            "primary_dark": "#0891b2",
+            "text": "#f8fafc",
+            "muted": "#94a3b8",
+            "dim": "#64748b",
+            "emerald": "#10b981",
+            "danger": "#ef4444",
+            "amber": "#f59e0b"
+        }
+
+        self.setup_styles()
+
+        self.current_category = "All"
+        self.search_query = ""
+
+        # Container Frame
+        self.container = tk.Frame(self, bg=self.colors["bg"])
+        self.container.pack(fill="both", expand=True)
+
+        self.show_auth_screen()
+
+    def setup_styles(self):
+        style = ttk.Style(self)
+        style.theme_use("clam")
+
+        # Configure Treeview style
+        style.configure(
+            "Treeview",
+            background=self.colors["card"],
+            foreground=self.colors["text"],
+            fieldbackground=self.colors["card"],
+            rowheight=36,
+            font=("Helvetica", 10),
+            borderwidth=0
+        )
+        style.configure(
+            "Treeview.Heading",
+            background="#111827",
+            foreground=self.colors["muted"],
+            font=("Helvetica", 9, "bold"),
+            borderwidth=0
+        )
+        style.map("Treeview", background=[("selected", self.colors["primary_dark"])], foreground=[("selected", "#ffffff")])
+
+    def show_auth_screen(self):
+        for widget in self.container.winfo_children():
+            widget.destroy()
+
+        is_existing = self.session.is_initialized()
+        vault_name = os.path.basename(self.session.vault_path)
+
+        auth_frame = tk.Frame(self.container, bg=self.colors["bg"])
+        auth_frame.place(relx=0.5, rely=0.5, anchor="center")
+
+        card = tk.Frame(auth_frame, bg=self.colors["card"], padx=35, pady=35, highlightbackground=self.colors["card_hover"], highlightthickness=1)
+        card.pack()
+
+        # Icon & Title
+        icon_label = tk.Label(card, text="🛡️" if not is_existing else "🔒", font=("Segoe UI Emoji", 36), bg=self.colors["card"])
+        icon_label.pack(pady=(0, 10))
+
+        title_text = "Create Encrypted Vault" if not is_existing else "Unlock Vault"
+        lbl_title = tk.Label(card, text=title_text, font=("Helvetica", 16, "bold"), fg=self.colors["primary"], bg=self.colors["card"])
+        lbl_title.pack()
+
+        lbl_sub = tk.Label(card, text=f"Vault File: {vault_name}", font=("Helvetica", 9), fg=self.colors["muted"], bg=self.colors["card"])
+        lbl_sub.pack(pady=(2, 20))
+
+        # Password Entry
+        lbl_pwd = tk.Label(card, text="Master Password:", font=("Helvetica", 10, "bold"), fg=self.colors["text"], bg=self.colors["card"])
+        lbl_pwd.pack(anchor="w", pady=(0, 5))
+
+        pwd_frame = tk.Frame(card, bg=self.colors["card"])
+        pwd_frame.pack(fill="x", pady=(0, 10))
+
+        self.entry_pwd = tk.Entry(
+            pwd_frame,
+            show="•",
+            font=("Helvetica", 12),
+            bg=self.colors["bg"],
+            fg=self.colors["text"],
+            insertbackground=self.colors["primary"],
+            relief="flat",
+            bd=6,
+            width=30
+        )
+        self.entry_pwd.pack(side="left", fill="x", expand=True)
+        self.entry_pwd.focus_set()
+
+        self.show_pwd_var = tk.BooleanVar(value=False)
+        btn_eye = tk.Checkbutton(
+            pwd_frame,
+            text="👁",
+            variable=self.show_pwd_var,
+            command=self.toggle_pwd_visibility,
+            bg=self.colors["card"],
+            fg=self.colors["muted"],
+            activebackground=self.colors["card"],
+            selectcolor=self.colors["bg"],
+            indicatoron=False,
+            bd=0,
+            padx=8,
+            cursor="hand2"
+        )
+        btn_eye.pack(side="right", padx=(5, 0))
+
+        if not is_existing:
+            lbl_confirm = tk.Label(card, text="Confirm Master Password:", font=("Helvetica", 10, "bold"), fg=self.colors["text"], bg=self.colors["card"])
+            lbl_confirm.pack(anchor="w", pady=(5, 5))
+
+            self.entry_confirm = tk.Entry(
+                card,
+                show="•",
+                font=("Helvetica", 12),
+                bg=self.colors["bg"],
+                fg=self.colors["text"],
+                insertbackground=self.colors["primary"],
+                relief="flat",
+                bd=6
+            )
+            self.entry_confirm.pack(fill="x", pady=(0, 15))
+
+        self.lbl_auth_error = tk.Label(card, text="", font=("Helvetica", 9), fg=self.colors["danger"], bg=self.colors["card"])
+        self.lbl_auth_error.pack(anchor="w", pady=(0, 10))
+
+        btn_text = "🚀 Initialize Vault" if not is_existing else "🔓 Unlock Vault"
+        btn_submit = tk.Button(
+            card,
+            text=btn_text,
+            command=self.handle_auth_submit,
+            font=("Helvetica", 11, "bold"),
+            bg=self.colors["primary"],
+            fg=self.colors["bg"],
+            activebackground=self.colors["primary_dark"],
+            activeforeground="#ffffff",
+            relief="flat",
+            pady=8,
+            cursor="hand2"
+        )
+        btn_submit.pack(fill="x")
+
+        self.entry_pwd.bind("<Return>", lambda e: self.handle_auth_submit())
+        if not is_existing:
+            self.entry_confirm.bind("<Return>", lambda e: self.handle_auth_submit())
+
+    def toggle_pwd_visibility(self):
+        show_char = "" if self.show_pwd_var.get() else "•"
+        self.entry_pwd.config(show=show_char)
+        if hasattr(self, 'entry_confirm'):
+            self.entry_confirm.config(show=show_char)
+
+    def handle_auth_submit(self):
+        pwd = self.entry_pwd.get().strip()
         if not pwd:
-            error_label.config(text="Password cannot be empty.", fg="#f87171")
+            self.lbl_auth_error.config(text="Password cannot be empty.")
             return
 
-        error_label.config(text="Decrypting & Verifying...", fg="#38bdf8")
-        root.update()
+        is_existing = self.session.is_initialized()
+        if not is_existing:
+            confirm = self.entry_confirm.get().strip()
+            if pwd != confirm:
+                self.lbl_auth_error.config(text="Passwords do not match.")
+                return
+
+        self.lbl_auth_error.config(text="Decrypting & verifying...", fg=self.colors["primary"])
+        self.update_idletasks()
 
         try:
             if is_existing:
-                session_obj.unlock(pwd)
+                self.session.unlock(pwd)
             else:
-                session_obj.create(pwd)
-            success = True
-            root.destroy()
+                self.session.create(pwd)
+            self.show_dashboard()
         except VaultSecurityError:
-            error_label.config(text="Incorrect password. Access denied.", fg="#f87171")
-            pwd_entry.delete(0, tk.END)
-        except Exception as err:
-            error_label.config(text=f"Error: {str(err)}", fg="#f87171")
+            self.lbl_auth_error.config(text="Incorrect password. Access denied.", fg=self.colors["danger"])
+            self.entry_pwd.delete(0, tk.END)
+        except Exception as e:
+            self.lbl_auth_error.config(text=f"Error: {str(e)}", fg=self.colors["danger"])
 
-    pwd_entry.bind("<Return>", on_submit)
+    def show_dashboard(self):
+        for widget in self.container.winfo_children():
+            widget.destroy()
 
-    # Button Container
-    btn_frame = tk.Frame(root, bg="#0f172a", pady=10, padx=20)
-    btn_frame.pack(fill="x")
+        # Main Layout: Header, Filter Bar, Treeview, Action Bar
+        header = tk.Frame(self.container, bg=self.colors["card"], padx=20, pady=12)
+        header.pack(fill="x")
 
-    cancel_btn = tk.Button(
-        btn_frame,
-        text="Cancel",
-        command=root.destroy,
-        bg="#334155",
-        fg="#f8fafc",
-        activebackground="#475569",
-        activeforeground="#ffffff",
-        relief="flat",
-        padx=15,
-        pady=5,
-        cursor="hand2"
-    )
-    cancel_btn.pack(side="right", padx=(10, 0))
+        # Brand / Title
+        brand_frame = tk.Frame(header, bg=self.colors["card"])
+        brand_frame.pack(side="left")
 
-    action_text = "Unlock" if is_existing else "Create & Unlock"
-    action_btn = tk.Button(
-        btn_frame,
-        text=action_text,
-        command=on_submit,
-        bg="#06b6d4",
-        fg="#0f172a",
-        font=("Helvetica", 10, "bold"),
-        activebackground="#0891b2",
-        activeforeground="#ffffff",
-        relief="flat",
-        padx=18,
-        pady=5,
-        cursor="hand2"
-    )
-    action_btn.pack(side="right")
+        lbl_logo = tk.Label(brand_frame, text="🛡️", font=("Segoe UI Emoji", 18), bg=self.colors["card"])
+        lbl_logo.pack(side="left", padx=(0, 8))
 
-    root.mainloop()
-    return success
+        lbl_brand = tk.Label(brand_frame, text="Locker Vault", font=("Helvetica", 14, "bold"), fg=self.colors["primary"], bg=self.colors["card"])
+        lbl_brand.pack(side="left")
+
+        lbl_tag = tk.Label(brand_frame, text="OFFLINE", font=("Helvetica", 8, "bold"), fg=self.colors["emerald"], bg="#064e3b", padx=6, pady=2)
+        lbl_tag.pack(side="left", padx=(10, 0))
+
+        # Header Right Controls
+        ctrl_frame = tk.Frame(header, bg=self.colors["card"])
+        ctrl_frame.pack(side="right")
+
+        self.lbl_stats = tk.Label(ctrl_frame, text="", font=("Helvetica", 9), fg=self.colors["muted"], bg=self.colors["card"])
+        self.lbl_stats.pack(side="left", padx=(0, 15))
+
+        btn_settings = tk.Button(
+            ctrl_frame,
+            text="⚙️ Settings",
+            command=self.open_settings_modal,
+            bg=self.colors["bg"],
+            fg=self.colors["text"],
+            relief="flat",
+            padx=10,
+            pady=4,
+            cursor="hand2"
+        )
+        btn_settings.pack(side="left", padx=(0, 8))
+
+        btn_lock = tk.Button(
+            ctrl_frame,
+            text="🔒 Lock",
+            command=self.lock_vault,
+            bg=self.colors["danger"],
+            fg="#ffffff",
+            font=("Helvetica", 9, "bold"),
+            relief="flat",
+            padx=12,
+            pady=4,
+            cursor="hand2"
+        )
+        btn_lock.pack(side="left")
+
+        # Toolbar Frame
+        toolbar = tk.Frame(self.container, bg=self.colors["bg"], padx=20, pady=12)
+        toolbar.pack(fill="x")
+
+        # Search Box
+        search_frame = tk.Frame(toolbar, bg=self.colors["card"], padx=10, pady=4)
+        search_frame.pack(side="left", fill="x", expand=True, padx=(0, 15))
+
+        lbl_src_icon = tk.Label(search_frame, text="🔍", font=("Segoe UI Emoji", 10), bg=self.colors["card"], fg=self.colors["muted"])
+        lbl_src_icon.pack(side="left", padx=(0, 5))
+
+        self.entry_search = tk.Entry(
+            search_frame,
+            font=("Helvetica", 10),
+            bg=self.colors["card"],
+            fg=self.colors["text"],
+            insertbackground=self.colors["primary"],
+            relief="flat",
+            bd=2
+        )
+        self.entry_search.pack(side="left", fill="x", expand=True)
+        self.entry_search.bind("<KeyRelease>", lambda e: self.refresh_items())
+
+        # Category Chips
+        cat_frame = tk.Frame(toolbar, bg=self.colors["bg"])
+        cat_frame.pack(side="right")
+
+        self.cat_buttons = {}
+        categories = ["All", "Favorites", "Documents", "Notes", "Passwords", "Personal"]
+        for cat in categories:
+            btn = tk.Button(
+                cat_frame,
+                text=cat,
+                command=lambda c=cat: self.set_category_filter(c),
+                font=("Helvetica", 9),
+                bg=self.colors["primary_dark"] if cat == "All" else self.colors["card"],
+                fg="#ffffff" if cat == "All" else self.colors["muted"],
+                relief="flat",
+                padx=10,
+                pady=4,
+                cursor="hand2"
+            )
+            btn.pack(side="left", padx=2)
+            self.cat_buttons[cat] = btn
+
+        # Main Table / Treeview Container
+        main_body = tk.Frame(self.container, bg=self.colors["bg"], padx=20, pady=0)
+        main_body.pack(fill="both", expand=True)
+
+        columns = ("fav", "name", "type", "category", "size", "date")
+        self.tree = ttk.Treeview(main_body, columns=columns, show="headings", selectmode="browse")
+
+        self.tree.heading("fav", text="⭐")
+        self.tree.heading("name", text="Name")
+        self.tree.heading("type", text="Type")
+        self.tree.heading("category", text="Category")
+        self.tree.heading("size", text="Size")
+        self.tree.heading("date", text="Date Added")
+
+        self.tree.column("fav", width=40, anchor="center")
+        self.tree.column("name", width=320, anchor="w")
+        self.tree.column("type", width=80, anchor="center")
+        self.tree.column("category", width=120, anchor="center")
+        self.tree.column("size", width=100, anchor="center")
+        self.tree.column("date", width=160, anchor="center")
+
+        scrollbar = ttk.Scrollbar(main_body, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+
+        self.tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        self.tree.bind("<Double-1>", lambda e: self.open_selected_item())
+        self.tree.bind("<Return>", lambda e: self.open_selected_item())
+
+        # Action Bar (Bottom)
+        action_bar = tk.Frame(self.container, bg=self.colors["card"], padx=20, pady=10)
+        action_bar.pack(fill="x")
+
+        btn_add_file = tk.Button(
+            action_bar,
+            text="📥 Encrypt File(s)",
+            command=self.handle_add_files,
+            font=("Helvetica", 10, "bold"),
+            bg=self.colors["primary"],
+            fg=self.colors["bg"],
+            activebackground=self.colors["primary_dark"],
+            relief="flat",
+            padx=14,
+            pady=6,
+            cursor="hand2"
+        )
+        btn_add_file.pack(side="left", padx=(0, 8))
+
+        btn_add_note = tk.Button(
+            action_bar,
+            text="✍️ Add Note",
+            command=self.open_add_note_modal,
+            font=("Helvetica", 10),
+            bg=self.colors["bg"],
+            fg=self.colors["text"],
+            relief="flat",
+            padx=14,
+            pady=6,
+            cursor="hand2"
+        )
+        btn_add_note.pack(side="left", padx=(0, 8))
+
+        btn_gen = tk.Button(
+            action_bar,
+            text="🎲 Generator",
+            command=self.open_generator_modal,
+            font=("Helvetica", 10),
+            bg=self.colors["bg"],
+            fg=self.colors["text"],
+            relief="flat",
+            padx=12,
+            pady=6,
+            cursor="hand2"
+        )
+        btn_gen.pack(side="left", padx=(0, 15))
+
+        btn_fav = tk.Button(
+            action_bar,
+            text="⭐ Favorite",
+            command=self.toggle_favorite_selected,
+            font=("Helvetica", 9),
+            bg=self.colors["bg"],
+            fg=self.colors["amber"],
+            relief="flat",
+            padx=10,
+            pady=6,
+            cursor="hand2"
+        )
+        btn_fav.pack(side="right", padx=(8, 0))
+
+        btn_delete = tk.Button(
+            action_bar,
+            text="🗑️ Delete",
+            command=self.delete_selected_item,
+            font=("Helvetica", 9),
+            bg=self.colors["bg"],
+            fg=self.colors["danger"],
+            relief="flat",
+            padx=10,
+            pady=6,
+            cursor="hand2"
+        )
+        btn_delete.pack(side="right", padx=(8, 0))
+
+        btn_extract = tk.Button(
+            action_bar,
+            text="⬇️ Extract / Save",
+            command=self.extract_selected_item,
+            font=("Helvetica", 9),
+            bg=self.colors["bg"],
+            fg=self.colors["text"],
+            relief="flat",
+            padx=12,
+            pady=6,
+            cursor="hand2"
+        )
+        btn_extract.pack(side="right")
+
+        self.refresh_items()
+
+    def set_category_filter(self, category: str):
+        self.current_category = category
+        for cat, btn in self.cat_buttons.items():
+            if cat == category:
+                btn.config(bg=self.colors["primary_dark"], fg="#ffffff")
+            else:
+                btn.config(bg=self.colors["card"], fg=self.colors["muted"])
+        self.refresh_items()
+
+    def refresh_items(self):
+        if not self.session.is_unlocked():
+            self.show_auth_screen()
+            return
+
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+
+        items = self.session.vault_data.get("items", {})
+        query = self.entry_search.get().lower().strip() if hasattr(self, 'entry_search') else ""
+
+        total_bytes = 0
+
+        for item_id, item in items.items():
+            size = item.get("size", 0)
+            total_bytes += size
+
+            # Category filter
+            cat = item.get("category", "Documents")
+            is_fav = item.get("favorite", False)
+            if self.current_category == "Favorites" and not is_fav:
+                continue
+            elif self.current_category not in ["All", "Favorites"] and cat != self.current_category:
+                continue
+
+            # Search filter
+            name = item.get("name", "")
+            notes = item.get("notes", "")
+            if query and query not in name.lower() and query not in notes.lower() and query not in cat.lower():
+                continue
+
+            fav_str = "⭐" if is_fav else ""
+            item_type = item.get("type", "file").upper()
+            size_str = self.format_size(size)
+            date_str = item.get("created_at", "")[:10]
+
+            self.tree.insert("", "end", iid=item_id, values=(fav_str, name, item_type, cat, size_str, date_str))
+
+        if hasattr(self, 'lbl_stats'):
+            self.lbl_stats.config(text=f"📦 {len(items)} Items  |  💾 {self.format_size(total_bytes)}")
+
+    def format_size(self, size_bytes: int) -> str:
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        else:
+            return f"{size_bytes / (1024 * 1024):.2f} MB"
+
+    def get_selected_item_id(self) -> Optional[str]:
+        selected = self.tree.selection()
+        return selected[0] if selected else None
+
+    def handle_add_files(self):
+        file_paths = filedialog.askopenfilenames(title="Select File(s) to Encrypt into Vault")
+        if not file_paths:
+            return
+
+        added_count = 0
+        for fp in file_paths:
+            try:
+                VaultCore.add_file_item(self.session.vault_data, fp, category="Documents")
+                added_count += 1
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to encrypt file {os.path.basename(fp)}: {e}")
+
+        if added_count > 0:
+            self.session.save()
+            self.refresh_items()
+            messagebox.showinfo("Success", f"Successfully encrypted and saved {added_count} file(s) into vault.")
+
+    def open_add_note_modal(self):
+        modal = tk.Toplevel(self)
+        modal.title("Add Encrypted Secret Note")
+        modal.geometry("460x380")
+        modal.configure(bg=self.colors["bg"])
+        modal.grab_set()
+
+        lbl_t = tk.Label(modal, text="Title / Name:", font=("Helvetica", 10, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_t.pack(anchor="w", padx=20, pady=(15, 4))
+
+        e_title = tk.Entry(modal, font=("Helvetica", 10), bg=self.colors["card"], fg=self.colors["text"], insertbackground=self.colors["primary"], bd=2)
+        e_title.pack(fill="x", padx=20)
+
+        lbl_c = tk.Label(modal, text="Category:", font=("Helvetica", 10, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_c.pack(anchor="w", padx=20, pady=(10, 4))
+
+        c_cat = ttk.Combobox(modal, values=["Notes", "Passwords", "Finance", "Personal"], state="readonly")
+        c_cat.set("Notes")
+        c_cat.pack(fill="x", padx=20)
+
+        lbl_n = tk.Label(modal, text="Secret Note Content:", font=("Helvetica", 10, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_n.pack(anchor="w", padx=20, pady=(10, 4))
+
+        t_content = tk.Text(modal, height=8, font=("Helvetica", 10), bg=self.colors["card"], fg=self.colors["text"], insertbackground=self.colors["primary"], bd=2)
+        t_content.pack(fill="both", expand=True, padx=20, pady=(0, 15))
+
+        def save_note():
+            title = e_title.get().strip()
+            content = t_content.get("1.0", tk.END).strip()
+            cat = c_cat.get()
+            if not title or not content:
+                messagebox.showwarning("Warning", "Title and content cannot be empty.", parent=modal)
+                return
+
+            VaultCore.add_note_item(self.session.vault_data, title, content, category=cat)
+            self.session.save()
+            self.refresh_items()
+            modal.destroy()
+            messagebox.showinfo("Success", "Secret note encrypted and saved successfully.")
+
+        btn_save = tk.Button(modal, text="🔒 Encrypt & Save", command=save_note, font=("Helvetica", 10, "bold"), bg=self.colors["primary"], fg=self.colors["bg"], relief="flat", pady=6)
+        btn_save.pack(fill="x", padx=20, pady=(0, 15))
+
+    def open_selected_item(self):
+        item_id = self.get_selected_item_id()
+        if not item_id:
+            return
+
+        item = self.session.vault_data.get("items", {}).get(item_id)
+        if not item:
+            return
+
+        modal = tk.Toplevel(self)
+        modal.title(f"View Item - {item.get('name')}")
+        modal.geometry("520x420")
+        modal.configure(bg=self.colors["bg"])
+        modal.grab_set()
+
+        lbl_t = tk.Label(modal, text=item.get("name"), font=("Helvetica", 12, "bold"), fg=self.colors["primary"], bg=self.colors["bg"])
+        lbl_t.pack(anchor="w", padx=20, pady=(15, 2))
+
+        meta_str = f"Type: {item.get('type').upper()}  |  Category: {item.get('category')}  |  Size: {self.format_size(item.get('size', 0))}"
+        lbl_meta = tk.Label(modal, text=meta_str, font=("Helvetica", 9), fg=self.colors["muted"], bg=self.colors["bg"])
+        lbl_meta.pack(anchor="w", padx=20, pady=(0, 10))
+
+        content_box = tk.Text(modal, font=("Courier", 10), bg=self.colors["card"], fg=self.colors["text"], bd=2)
+        content_box.pack(fill="both", expand=True, padx=20, pady=(0, 15))
+
+        if item.get("type") == "note":
+            content_box.insert("1.0", item.get("content", ""))
+        else:
+            content_box.insert("1.0", f"[Encrypted File Payload]\nFilename: {item.get('filename')}\nNotes: {item.get('notes', 'N/A')}")
+            content_box.config(state="disabled")
+
+        btn_frame = tk.Frame(modal, bg=self.colors["bg"])
+        btn_frame.pack(fill="x", padx=20, pady=(0, 15))
+
+        def copy_to_clipboard():
+            text = item.get("content", "") if item.get("type") == "note" else item.get("filename")
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            messagebox.showinfo("Copied", "Content copied to clipboard!", parent=modal)
+
+        btn_copy = tk.Button(btn_frame, text="📋 Copy", command=copy_to_clipboard, bg=self.colors["card"], fg=self.colors["text"], relief="flat", padx=12, pady=4)
+        btn_copy.pack(side="left")
+
+        if item.get("type") == "file":
+            btn_dl = tk.Button(btn_frame, text="⬇️ Save Decrypted File", command=lambda: self.extract_item_by_id(item_id), bg=self.colors["primary"], fg=self.colors["bg"], relief="flat", padx=12, pady=4)
+            btn_dl.pack(side="right")
+
+    def toggle_favorite_selected(self):
+        item_id = self.get_selected_item_id()
+        if not item_id:
+            messagebox.showwarning("Select Item", "Please select an item from the list first.")
+            return
+
+        VaultCore.toggle_favorite(self.session.vault_data, item_id)
+        self.session.save()
+        self.refresh_items()
+
+    def delete_selected_item(self):
+        item_id = self.get_selected_item_id()
+        if not item_id:
+            messagebox.showwarning("Select Item", "Please select an item to delete.")
+            return
+
+        item = self.session.vault_data.get("items", {}).get(item_id, {})
+        if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete '{item.get('name')}' permanently?"):
+            VaultCore.delete_item(self.session.vault_data, item_id)
+            self.session.save()
+            self.refresh_items()
+
+    def extract_selected_item(self):
+        item_id = self.get_selected_item_id()
+        if not item_id:
+            messagebox.showwarning("Select Item", "Please select an item to extract.")
+            return
+        self.extract_item_by_id(item_id)
+
+    def extract_item_by_id(self, item_id: str):
+        item = self.session.vault_data.get("items", {}).get(item_id)
+        if not item:
+            return
+
+        default_name = item.get("filename", f"{item.get('name')}.txt")
+        out_path = filedialog.asksaveasfilename(title="Save Decrypted File As", initialfile=default_name)
+        if not out_path:
+            return
+
+        try:
+            if item.get("type") == "note":
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(item.get("content", ""))
+            else:
+                raw_bytes = base64.b64decode(item.get("data", ""))
+                with open(out_path, "wb") as f:
+                    f.write(raw_bytes)
+            messagebox.showinfo("Success", f"Decrypted item saved to:\n{out_path}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save file: {e}")
+
+    def open_generator_modal(self):
+        modal = tk.Toplevel(self)
+        modal.title("Password & Key Generator")
+        modal.geometry("420x340")
+        modal.configure(bg=self.colors["bg"])
+        modal.grab_set()
+
+        lbl_out = tk.Label(modal, text="Generated Password:", font=("Helvetica", 10, "bold"), fg=self.colors["text"], bg=self.colors["bg"])
+        lbl_out.pack(anchor="w", padx=20, pady=(15, 4))
+
+        e_res = tk.Entry(modal, font=("Courier", 12, "bold"), bg=self.colors["card"], fg=self.colors["primary"], bd=2)
+        e_res.pack(fill="x", padx=20)
+
+        lbl_entropy = tk.Label(modal, text="Entropy: 128 bits (Very Strong)", font=("Helvetica", 9), fg=self.colors["emerald"], bg=self.colors["bg"])
+        lbl_entropy.pack(anchor="w", padx=20, pady=(4, 10))
+
+        scale_len = tk.Scale(modal, from_=8, to=64, orient="horizontal", label="Password Length", bg=self.colors["bg"], fg=self.colors["text"], highlightthickness=0)
+        scale_len.set(20)
+        scale_len.pack(fill="x", padx=20, pady=5)
+
+        def generate():
+            chars = string.ascii_letters + string.digits + "!@#$%^&*()"
+            pwd_len = scale_len.get()
+            pwd = "".join(random.choice(chars) for _ in range(pwd_len))
+            e_res.delete(0, tk.END)
+            e_res.insert(0, pwd)
+
+            entropy = pwd_len * math.log2(len(chars))
+            lbl_entropy.config(text=f"Entropy: {entropy:.1f} bits (Very Strong)")
+
+        scale_len.config(command=lambda e: generate())
+        generate()
+
+        btn_copy = tk.Button(modal, text="📋 Copy Password", command=lambda: (self.clipboard_clear(), self.clipboard_append(e_res.get()), messagebox.showinfo("Copied", "Password copied!")), font=("Helvetica", 10, "bold"), bg=self.colors["primary"], fg=self.colors["bg"], relief="flat", pady=6)
+        btn_copy.pack(fill="x", padx=20, pady=15)
+
+    def open_settings_modal(self):
+        modal = tk.Toplevel(self)
+        modal.title("Vault Settings & Backup")
+        modal.geometry("450x300")
+        modal.configure(bg=self.colors["bg"])
+        modal.grab_set()
+
+        lbl_h = tk.Label(modal, text="⚙️ Vault Settings", font=("Helvetica", 12, "bold"), fg=self.colors["primary"], bg=self.colors["bg"])
+        lbl_h.pack(anchor="w", padx=20, pady=(15, 10))
+
+        def backup_vault():
+            out_path = filedialog.asksaveasfilename(title="Backup Vault Container File", initialfile=os.path.basename(self.session.vault_path))
+            if out_path:
+                import shutil
+                shutil.copy(self.session.vault_path, out_path)
+                messagebox.showinfo("Backup Success", f"Vault file backed up to:\n{out_path}", parent=modal)
+
+        btn_bk = tk.Button(modal, text="💾 Export Backup Vault Container", command=backup_vault, bg=self.colors["card"], fg=self.colors["text"], relief="flat", padx=12, pady=6)
+        btn_bk.pack(fill="x", padx=20, pady=10)
+
+    def lock_vault(self):
+        self.session.lock()
+        self.show_auth_screen()
 
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Local Encrypted Storage Vault Server")
+    parser = argparse.ArgumentParser(description="Locker - Encrypted Storage Vault (100% Offline Native Desktop App)")
     parser.add_argument("vault_file", nargs="?", default=None, help="Path to .locker or .vault file to open")
     parser.add_argument("--vault", default=None, help="Path to .locker or .vault file")
-    parser.add_argument("--gui", action="store_true", help="Force native GUI password prompt")
-    parser.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")
-    parser.add_argument("--port", type=int, default=PORT, help="Port to run server on")
 
     args = parser.parse_args()
+    target_vault = args.vault or args.vault_file or DEFAULT_VAULT_FILE
 
-    target_vault = args.vault or args.vault_file
-    if target_vault:
-        session.vault_path = os.path.abspath(target_vault)
-        # Prompt password via native Tkinter GUI when opened with a file argument or --gui flag
-        print(f"Opening target vault file: {session.vault_path}")
-        unlocked = prompt_master_password_gui(session.vault_path, session)
-        if not unlocked:
-            print("Vault unlock canceled by user. Exiting.")
-            sys.exit(0)
-
-    server = ThreadingHTTPServer((HOST, args.port), VaultHTTPRequestHandler)
-    url = f"http://{HOST}:{args.port}"
-
-    print("=" * 60)
-    print("      LOCAL ENCRYPTED STORAGE VAULT (100% OFFLINE)")
-    print("=" * 60)
-    print(f" Vault File: {session.vault_path}")
-    print(f" Server running locally at: {url}")
-    print(" Security: Zero cloud access, bound strictly to 127.0.0.1")
-    print(" Press Ctrl+C to stop the vault server.")
-    print("=" * 60)
-
-    # Launch browser / app mode unless --no-browser flag is passed
-    if not args.no_browser:
-        launch_desktop_app_mode(url)
-
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nLocking vault and shutting down server safely...")
-        session.lock()
-        server.server_close()
-        sys.exit(0)
+    app = LockerApp(target_vault)
+    app.mainloop()
 
 
 if __name__ == "__main__":
     main()
-
