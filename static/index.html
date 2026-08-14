@@ -123,55 +123,36 @@
     <!-- Main Dashboard (Unlocked View) -->
     <section id="dashboardSection" class="dashboard-wrapper hidden">
 
-      <!-- Stats Banner -->
-      <div class="stats-grid">
-        <div class="stat-card glass-card">
-          <div class="stat-icon">📦</div>
-          <div>
-            <div class="stat-value" id="statTotalItems">0</div>
-            <div class="stat-label">Stored Items</div>
-          </div>
+      <!-- Compact Vault Header Summary -->
+      <div class="vault-summary-strip glass-card">
+        <div class="summary-meta">
+          <span class="summary-pill">📦 <strong id="statTotalItems">0</strong> items</span>
+          <span class="summary-divider">•</span>
+          <span class="summary-pill">💾 <strong id="statTotalSize">0 KB</strong></span>
+          <span class="summary-divider">•</span>
+          <span class="summary-pill">🔐 AES-256-GCM</span>
+          <span class="summary-divider">•</span>
+          <span class="summary-pill">⌛ Auto-lock: <strong id="statAutoLock">15m</strong></span>
         </div>
 
-        <div class="stat-card glass-card">
-          <div class="stat-icon">💾</div>
-          <div>
-            <div class="stat-value" id="statTotalSize">0 KB</div>
-            <div class="stat-label">Vault Storage</div>
-          </div>
-        </div>
-
-        <div class="stat-card glass-card">
-          <div class="stat-icon">🔐</div>
-          <div>
-            <div class="stat-value">AES-256-GCM</div>
-            <div class="stat-label">Argon2id KDF</div>
-          </div>
-        </div>
-
-        <div class="stat-card glass-card">
-          <div class="stat-icon">⌛</div>
-          <div>
-            <div class="stat-value" id="statAutoLock">15m</div>
-            <div class="stat-label">Auto-Lock Idle</div>
-          </div>
+        <div class="action-buttons">
+          <button class="btn btn-primary" onclick="openUploadModal()">
+            + Encrypt File
+          </button>
+          <button class="btn btn-secondary" onclick="openNoteModal()">
+            + Add Note
+          </button>
+          <button class="btn btn-outline" onclick="openGeneratorModal()" title="Password Generator">
+            🎲 Generator
+          </button>
         </div>
       </div>
 
-      <!-- Action & Toolbar -->
+      <!-- Controls & Filter Bar -->
       <div class="toolbar glass-card">
         <div class="search-box">
           <span class="search-icon">🔍</span>
-          <input type="text" id="searchInput" placeholder="Search stored files, notes, credentials (Ctrl+F)..." oninput="renderItems()">
-        </div>
-
-        <div class="sort-box">
-          <select id="sortSelect" onchange="renderItems()" class="sort-select">
-            <option value="newest">📅 Newest First</option>
-            <option value="oldest">⌛ Oldest First</option>
-            <option value="name">🔤 Name (A-Z)</option>
-            <option value="size">📊 Size (Largest)</option>
-          </select>
+          <input type="text" id="searchInput" placeholder="Search files, notes, credentials... (Ctrl+F)" oninput="renderItems()">
         </div>
 
         <div class="category-filters" id="categoryFilters">
@@ -183,16 +164,13 @@
           <button class="chip" onclick="setCategoryFilter('Personal')">🔒 Personal <span class="chip-count" id="cntPers">0</span></button>
         </div>
 
-        <div class="action-buttons">
-          <button class="btn btn-primary" onclick="openUploadModal()">
-            📥 Encrypt File
-          </button>
-          <button class="btn btn-secondary" onclick="openNoteModal()">
-            ✍️ Add Note
-          </button>
-          <button class="btn btn-outline" onclick="openGeneratorModal()">
-            🎲 Generator
-          </button>
+        <div class="sort-box">
+          <select id="sortSelect" onchange="renderItems()" class="sort-select">
+            <option value="newest">Sort: Newest</option>
+            <option value="oldest">Sort: Oldest</option>
+            <option value="name">Sort: Name (A-Z)</option>
+            <option value="size">Sort: Size</option>
+          </select>
         </div>
       </div>
 
@@ -203,17 +181,17 @@
 
       <!-- Empty State -->
       <div id="emptyState" class="empty-state glass-card hidden">
-        <div class="empty-icon">📂</div>
-        <h3>No Encrypted Items Found</h3>
-        <p>Your vault is ready! Encrypt your first document, confidential image, or secret note.</p>
+        <div class="empty-icon">🔐</div>
+        <h3>Your Vault is Empty</h3>
+        <p>Encrypt your first confidential file, image, or secret note.</p>
 
         <div class="drop-hint-banner">
-          💡 <strong>Pro-Tip</strong>: Drag and drop files anywhere on this page to encrypt them instantly!
+          💡 Drag & drop files anywhere to encrypt them instantly
         </div>
 
         <div class="empty-actions">
-          <button class="btn btn-primary" onclick="openUploadModal()">Encrypt a File</button>
-          <button class="btn btn-secondary" onclick="openNoteModal()">Create a Note</button>
+          <button class="btn btn-primary" onclick="openUploadModal()">+ Encrypt a File</button>
+          <button class="btn btn-secondary" onclick="openNoteModal()">+ Add Secret Note</button>
         </div>
       </div>
 
