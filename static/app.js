@@ -5,15 +5,97 @@ let state = {
   unlocked: false,
   items: [],
   selectedCategory: 'All',
-  selectedFile: null,
-  activeItem: null
+  selectedFiles: [],
+  activeItem: null,
+  categoryCounts: { All: 0, Favorites: 0, Documents: 0, Notes: 0, Passwords: 0, Personal: 0 }
 };
 
 // INITIALIZATION
 document.addEventListener('DOMContentLoaded', () => {
   checkVaultStatus();
   generatePassword();
+  initGlobalDragAndDrop();
+  initKeyboardShortcuts();
 });
+
+// GLOBAL DRAG & DROP FOR EASE OF USE
+function initGlobalDragAndDrop() {
+  const overlay = document.getElementById('globalDropOverlay');
+  let dragCounter = 0;
+
+  window.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    if (!state.unlocked) return;
+    dragCounter++;
+    overlay.classList.remove('hidden');
+  });
+
+  window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (!state.unlocked) return;
+  });
+
+  window.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    if (!state.unlocked) return;
+    dragCounter--;
+    if (dragCounter <= 0) {
+      dragCounter = 0;
+      overlay.classList.add('hidden');
+    }
+  });
+
+  window.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    overlay.classList.add('hidden');
+    if (!state.unlocked) return;
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files);
+      openUploadModalWithFiles(files);
+    }
+  });
+}
+
+// KEYBOARD SHORTCUTS
+function initKeyboardShortcuts() {
+  window.addEventListener('keydown', (e) => {
+    // Ctrl+F / Cmd+F -> Focus Search
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+      if (state.unlocked) {
+        e.preventDefault();
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) searchInput.focus();
+      }
+    }
+    // Ctrl+L / Cmd+L -> Lock Vault
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
+      if (state.unlocked) {
+        e.preventDefault();
+        lockVault();
+      }
+    }
+    // Ctrl+N / Cmd+N -> New Note
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
+      if (state.unlocked) {
+        e.preventDefault();
+        openNoteModal();
+      }
+    }
+    // Ctrl+U / Cmd+U -> Upload File
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'u') {
+      if (state.unlocked) {
+        e.preventDefault();
+        openUploadModal();
+      }
+    }
+    // Escape -> Close Modals
+    else if (e.key === 'Escape') {
+      closeAllModals();
+    }
+  });
+}
 
 // API REQUEST HELPER
 async function apiRequest(endpoint, method = 'GET', data = null) {
@@ -63,6 +145,7 @@ function updateUIState() {
   const statusText = document.getElementById('statusText');
   const btnLock = document.getElementById('btnLock');
   const btnSettings = document.getElementById('btnSettings');
+  const btnHotkeys = document.getElementById('btnHotkeys');
 
   if (!state.initialized) {
     // Show Setup Screen
@@ -74,6 +157,7 @@ function updateUIState() {
     statusText.innerText = 'Not Initialized';
     btnLock.classList.add('hidden');
     btnSettings.classList.add('hidden');
+    btnHotkeys.classList.add('hidden');
   } else if (!state.unlocked) {
     // Show Unlock Screen
     authSection.classList.remove('hidden');
@@ -84,6 +168,7 @@ function updateUIState() {
     statusText.innerText = 'Locked';
     btnLock.classList.add('hidden');
     btnSettings.classList.add('hidden');
+    btnHotkeys.classList.add('hidden');
   } else {
     // Show Dashboard
     authSection.classList.add('hidden');
@@ -92,6 +177,7 @@ function updateUIState() {
     statusText.innerText = 'Unlocked (RAM Active)';
     btnLock.classList.remove('hidden');
     btnSettings.classList.remove('hidden');
+    btnHotkeys.classList.remove('hidden');
   }
 }
 
@@ -159,6 +245,10 @@ async function loadItems() {
   try {
     const res = await apiRequest('/api/items');
     state.items = res.items || [];
+    if (res.counts) {
+      state.categoryCounts = res.counts;
+      updateCategoryCountsUI();
+    }
     renderItems();
     updateStats();
   } catch (err) {
@@ -166,16 +256,42 @@ async function loadItems() {
   }
 }
 
-// RENDER ITEMS GRID
+// UPDATE CATEGORY COUNTS IN CHIPS
+function updateCategoryCountsUI() {
+  const counts = state.categoryCounts;
+  document.getElementById('cntAll').innerText = counts.All || 0;
+  document.getElementById('cntFav').innerText = counts.Favorites || 0;
+  document.getElementById('cntDoc').innerText = counts.Documents || 0;
+  document.getElementById('cntNote').innerText = counts.Notes || 0;
+  document.getElementById('cntPass').innerText = counts.Passwords || 0;
+  document.getElementById('cntPers').innerText = counts.Personal || 0;
+}
+
+// RENDER ITEMS GRID WITH SORT & FILTERS
 function renderItems() {
   const container = document.getElementById('itemsContainer');
   const emptyState = document.getElementById('emptyState');
   const search = document.getElementById('searchInput').value.toLowerCase().trim();
+  const sort = document.getElementById('sortSelect').value;
 
   let filtered = state.items.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(search) || (item.notes && item.notes.toLowerCase().includes(search));
-    const matchesCat = state.selectedCategory === 'All' || item.category === state.selectedCategory;
+    let matchesCat = true;
+    if (state.selectedCategory === 'Favorites') {
+      matchesCat = item.favorite === true;
+    } else if (state.selectedCategory !== 'All') {
+      matchesCat = item.category === state.selectedCategory;
+    }
     return matchesSearch && matchesCat;
+  });
+
+  // Sorting
+  filtered.sort((a, b) => {
+    if (sort === 'newest') return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    if (sort === 'oldest') return new Date(a.created_at || 0) - new Date(b.created_at || 0);
+    if (sort === 'name') return a.name.localeCompare(b.name);
+    if (sort === 'size') return (b.size || 0) - (a.size || 0);
+    return 0;
   });
 
   if (filtered.length === 0) {
@@ -189,9 +305,10 @@ function renderItems() {
     const icon = getItemIcon(item.type, item.mime_type, item.category);
     const dateStr = formatDate(item.created_at);
     const sizeStr = formatBytes(item.size);
+    const favClass = item.favorite ? 'active' : '';
 
     return `
-      <div class="item-card glass-card" onclick="viewItem('${item.id}')">
+      <div class="item-card glass-card ${item.favorite ? 'is-favorite' : ''}" onclick="viewItem('${item.id}')">
         <div class="item-header">
           <div class="item-type-icon">${icon}</div>
           <div class="item-title-box">
@@ -201,14 +318,70 @@ function renderItems() {
               <span>• ${dateStr}</span>
             </div>
           </div>
+          <button class="btn-fav-star ${favClass}" onclick="toggleCardFavorite(event, '${item.id}')" title="Toggle Favorite">⭐</button>
         </div>
+        ${item.notes ? `<div class="item-snippet" title="${escapeHtml(item.notes)}">${escapeHtml(item.notes)}</div>` : ''}
         <div class="item-footer">
           <span class="item-size">${sizeStr}</span>
-          <span style="font-size: 0.8rem; color: var(--primary);">View & Extract →</span>
+          <div class="card-quick-actions">
+            ${item.type === 'note' ? `<button class="btn-card-action" onclick="quickCopyNote(event, '${item.id}')" title="Copy Secret Content">📋 Copy</button>` : ''}
+            <button class="btn-card-action" onclick="quickDownloadItem(event, '${item.id}')" title="Download File">⬇️ Download</button>
+          </div>
         </div>
       </div>
     `;
   }).join('');
+}
+
+// TOGGLE FAVORITE ON CARD
+async function toggleCardFavorite(e, itemId) {
+  e.stopPropagation();
+  try {
+    const res = await apiRequest('/api/favorite', 'POST', { item_id: itemId });
+    const item = state.items.find(i => i.id === itemId);
+    if (item) item.favorite = res.favorite;
+    loadItems();
+    showToast(res.favorite ? 'Added to Favorites ⭐' : 'Removed from Favorites', 'info');
+  } catch (err) {
+    showToast('Error updating favorite', 'error');
+  }
+}
+
+// TOGGLE FAVORITE IN MODAL
+async function toggleActiveItemFavorite() {
+  if (!state.activeItem) return;
+  try {
+    const res = await apiRequest('/api/favorite', 'POST', { item_id: state.activeItem.id });
+    state.activeItem.favorite = res.favorite;
+    const btn = document.getElementById('btnFavModal');
+    if (btn) btn.classList.toggle('active', res.favorite);
+    loadItems();
+    showToast(res.favorite ? 'Added to Favorites ⭐' : 'Removed from Favorites', 'info');
+  } catch (err) {
+    showToast('Error updating favorite', 'error');
+  }
+}
+
+// QUICK COPY NOTE SECRET FROM CARD
+async function quickCopyNote(e, itemId) {
+  e.stopPropagation();
+  try {
+    const res = await apiRequest(`/api/item/${itemId}`);
+    const item = res.item;
+    if (item && item.data_b64) {
+      const rawText = atob(item.data_b64);
+      await navigator.clipboard.writeText(rawText);
+      showToast(`Copied content of '${item.name}' to clipboard! 📋`, 'success');
+    }
+  } catch (err) {
+    showToast('Error copying content', 'error');
+  }
+}
+
+// QUICK DOWNLOAD FROM CARD
+function quickDownloadItem(e, itemId) {
+  e.stopPropagation();
+  window.location.href = `/api/download/${itemId}`;
 }
 
 // VIEW ITEM MODAL
@@ -219,6 +392,9 @@ async function viewItem(itemId) {
     state.activeItem = item;
 
     document.getElementById('viewItemTitle').innerText = item.name;
+    const favBtn = document.getElementById('btnFavModal');
+    if (favBtn) favBtn.classList.toggle('active', !!item.favorite);
+
     const body = document.getElementById('viewItemBody');
     const downloadBtn = document.getElementById('btnDownloadItem');
     const deleteBtn = document.getElementById('btnDeleteItem');
@@ -229,15 +405,26 @@ async function viewItem(itemId) {
     if (item.type === 'note') {
       const rawText = atob(item.data_b64 || '');
       body.innerHTML = `
-        <div class="form-group">
+        <div class="form-group" style="display: flex; justify-content: space-between; align-items: center;">
           <label>Category: <strong>${escapeHtml(item.category)}</strong></label>
+          <button class="btn btn-sm btn-secondary" onclick="navigator.clipboard.writeText(\`${escapeHtml(rawText.replace(/`/g, '\\`'))}\`); showToast('Copied to clipboard!', 'success');">📋 Copy Secret</button>
         </div>
         <div class="form-group">
           <label>Decrypted Content</label>
-          <pre style="background: rgba(15, 23, 42, 0.8); padding: 1rem; border-radius: var(--radius-md); border: 1px solid var(--border-card); font-family: var(--font-mono); white-space: pre-wrap; word-break: break-word;">${escapeHtml(rawText)}</pre>
+          <pre style="background: rgba(15, 23, 42, 0.85); padding: 1.2rem; border-radius: var(--radius-md); border: 1px solid var(--border-card); font-family: var(--font-mono); white-space: pre-wrap; word-break: break-word; color: #a5f3fc; font-size: 0.92rem;">${escapeHtml(rawText)}</pre>
         </div>
       `;
     } else {
+      const isImage = item.mime_type && item.mime_type.startsWith('image/');
+      let imageHtml = '';
+      if (isImage && item.data_b64) {
+        imageHtml = `
+          <div class="image-preview-box">
+            <img src="data:${item.mime_type};base64,${item.data_b64}" alt="${escapeHtml(item.name)}">
+          </div>
+        `;
+      }
+
       body.innerHTML = `
         <div class="form-group">
           <label>File Name: <strong>${escapeHtml(item.name)}</strong></label>
@@ -249,6 +436,7 @@ async function viewItem(itemId) {
           <label>MIME Type: <code>${escapeHtml(item.mime_type || 'application/octet-stream')}</code></label>
         </div>
         ${item.notes ? `<div class="form-group"><label>Notes:</label><p>${escapeHtml(item.notes)}</p></div>` : ''}
+        ${imageHtml}
       `;
     }
 
@@ -271,10 +459,10 @@ async function deleteItem(itemId) {
   }
 }
 
-// FILE SELECTION & DRAG-DROP
+// FILE SELECTION & DRAG-DROP FOR MODAL & GLOBAL
 function handleFileSelect(e) {
-  const file = e.target.files[0];
-  if (file) setFileForUpload(file);
+  const files = Array.from(e.target.files);
+  if (files.length > 0) setFilesForUpload(files);
 }
 
 function handleDragOver(e) {
@@ -291,66 +479,103 @@ function handleFileDrop(e) {
   e.preventDefault();
   document.getElementById('dropZone').classList.remove('dragover');
   if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-    setFileForUpload(e.dataTransfer.files[0]);
+    setFilesForUpload(Array.from(e.dataTransfer.files));
   }
 }
 
-function setFileForUpload(file) {
-  state.selectedFile = file;
-  document.getElementById('selectedFileName').innerText = file.name;
-  document.getElementById('selectedFileSize').innerText = formatBytes(file.size);
-  document.getElementById('selectedFileInfo').classList.remove('hidden');
+function openUploadModalWithFiles(files) {
+  openUploadModal();
+  setFilesForUpload(files);
+}
+
+function setFilesForUpload(files) {
+  state.selectedFiles = files;
+  const listContainer = document.getElementById('selectedFileList');
+  listContainer.innerHTML = files.map((f, idx) => `
+    <div class="selected-file-info">
+      <span class="file-badge">${getFileIconByExt(f.name)}</span>
+      <div class="file-meta">
+        <div class="file-name">${escapeHtml(f.name)}</div>
+        <div class="file-size">${formatBytes(f.size)}</div>
+      </div>
+      <button class="btn-sm btn-danger" onclick="removeSelectedFile(${idx})">✕</button>
+    </div>
+  `).join('');
+
+  listContainer.classList.remove('hidden');
   document.getElementById('dropZone').classList.add('hidden');
 }
 
-function clearSelectedFile() {
-  state.selectedFile = null;
+function removeSelectedFile(index) {
+  state.selectedFiles.splice(index, 1);
+  if (state.selectedFiles.length === 0) {
+    clearSelectedFiles();
+  } else {
+    setFilesForUpload(state.selectedFiles);
+  }
+}
+
+function clearSelectedFiles() {
+  state.selectedFiles = [];
   document.getElementById('fileInput').value = '';
-  document.getElementById('selectedFileInfo').classList.add('hidden');
+  document.getElementById('selectedFileList').classList.add('hidden');
+  document.getElementById('selectedFileList').innerHTML = '';
   document.getElementById('dropZone').classList.remove('hidden');
 }
 
-// SUBMIT FILE UPLOAD
+// SUBMIT FILE UPLOAD (SINGLE OR BATCH)
 async function submitFileUpload() {
-  if (!state.selectedFile) {
-    showToast('Please select a file to encrypt', 'error');
+  if (state.selectedFiles.length === 0) {
+    showToast('Please select file(s) to encrypt', 'error');
     return;
   }
 
-  const file = state.selectedFile;
   const category = document.getElementById('uploadCategory').value;
   const notes = document.getElementById('uploadNotes').value;
 
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const arrayBuffer = reader.result;
-    const bytes = new Uint8Array(arrayBuffer);
-    
-    // Convert bytes to base64
-    let binary = '';
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    const b64 = btoa(binary);
+  const filePayloads = [];
+  for (const file of state.selectedFiles) {
+    const b64 = await readFileAsBase64(file);
+    filePayloads.push({
+      filename: file.name,
+      data_b64: b64,
+      category: category,
+      notes: notes,
+      mime_type: file.type || 'application/octet-stream'
+    });
+  }
 
-    try {
-      await apiRequest('/api/upload', 'POST', {
-        filename: file.name,
-        data_b64: b64,
-        category: category,
-        notes: notes,
-        mime_type: file.type || 'application/octet-stream'
-      });
-      showToast(`Encrypted & stored '${file.name}'`, 'success');
-      closeModal('modalUpload');
-      clearSelectedFile();
-      loadItems();
-    } catch (err) {
-      showToast(err.message, 'error');
+  try {
+    if (filePayloads.length === 1) {
+      await apiRequest('/api/upload', 'POST', filePayloads[0]);
+      showToast(`Encrypted & stored '${filePayloads[0].filename}'`, 'success');
+    } else {
+      const res = await apiRequest('/api/batch-upload', 'POST', { files: filePayloads });
+      showToast(`Encrypted & stored ${res.added_count} files!`, 'success');
     }
-  };
-  reader.readAsArrayBuffer(file);
+    closeModal('modalUpload');
+    clearSelectedFiles();
+    loadItems();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const bytes = new Uint8Array(reader.result);
+      let binary = '';
+      const len = bytes.byteLength;
+      for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      resolve(btoa(binary));
+    };
+    reader.onerror = error => reject(error);
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 // SUBMIT SECURE NOTE
@@ -402,12 +627,12 @@ function downloadVaultBackup() {
 function setCategoryFilter(cat) {
   state.selectedCategory = cat;
   document.querySelectorAll('#categoryFilters .chip').forEach(btn => {
-    btn.classList.toggle('active', btn.innerText.includes(cat) || (cat === 'All' && btn.innerText === 'All'));
+    btn.classList.toggle('active', btn.innerText.includes(cat));
   });
   renderItems();
 }
 
-// PASSWORD GENERATOR TOOL
+// PASSWORD GENERATOR & ENTROPY
 function generatePassword() {
   const len = parseInt(document.getElementById('genLength').value) || 20;
   const useUpper = document.getElementById('chkUpper').checked;
@@ -415,13 +640,14 @@ function generatePassword() {
   const useNumbers = document.getElementById('chkNumbers').checked;
   const useSymbols = document.getElementById('chkSymbols').checked;
 
+  let poolSize = 0;
   let chars = '';
-  if (useUpper) chars += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  if (useLower) chars += 'abcdefghijklmnopqrstuvwxyz';
-  if (useNumbers) chars += '0123456789';
-  if (useSymbols) chars += '!@#$%^&*()_+-=[]{}|;:,.<>?';
+  if (useUpper) { chars += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'; poolSize += 26; }
+  if (useLower) { chars += 'abcdefghijklmnopqrstuvwxyz'; poolSize += 26; }
+  if (useNumbers) { chars += '0123456789'; poolSize += 10; }
+  if (useSymbols) { chars += '!@#$%^&*()_+-=[]{}|;:,.<>?'; poolSize += 32; }
 
-  if (!chars) chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  if (!chars) { chars = 'abcdefghijklmnopqrstuvwxyz0123456789'; poolSize = 36; }
 
   let pwd = '';
   const cryptoObj = window.crypto || window.msCrypto;
@@ -433,6 +659,22 @@ function generatePassword() {
   }
 
   document.getElementById('genResult').value = pwd;
+
+  // Calculate entropy: Bits = Length * log2(poolSize)
+  const entropy = Math.round(len * Math.log2(poolSize));
+  document.getElementById('entropyValue').innerText = `${entropy} bits`;
+
+  const ratingTag = document.getElementById('entropyRating');
+  if (entropy < 50) {
+    ratingTag.innerText = 'Weak';
+    ratingTag.className = 'entropy-tag tag-weak';
+  } else if (entropy < 80) {
+    ratingTag.innerText = 'Moderate';
+    ratingTag.className = 'entropy-tag tag-moderate';
+  } else {
+    ratingTag.innerText = 'Very Strong';
+    ratingTag.className = 'entropy-tag tag-strong';
+  }
 }
 
 function copyGenPassword() {
@@ -442,7 +684,16 @@ function copyGenPassword() {
   showToast('Password copied to clipboard!', 'success');
 }
 
-// PASSWORD STRENGTH CHECKER
+function saveGenAsNote() {
+  const pwd = document.getElementById('genResult').value;
+  closeModal('modalGenerator');
+  openNoteModal();
+  document.getElementById('noteTitle').value = 'Generated Password';
+  document.getElementById('noteCategory').value = 'Passwords';
+  document.getElementById('noteContent').value = pwd;
+}
+
+// PASSWORD STRENGTH CHECKER (FOR MASTER PASSWORD)
 function checkPasswordStrength(pwd) {
   const bar = document.getElementById('strengthBar');
   const txt = document.getElementById('strengthText');
@@ -487,16 +738,22 @@ function closeModal(id) {
   document.getElementById(id).classList.add('hidden');
 }
 
+function closeAllModals() {
+  document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden'));
+}
+
 function closeModalOnOverlay(e, id) {
   if (e.target.id === id) closeModal(id);
 }
 
-function openUploadModal() { openModal('modalUpload'); }
+function openUploadModal() {
+  clearSelectedFiles();
+  openModal('modalUpload');
+}
+
 function openNoteModal() { openModal('modalNote'); }
 function openGeneratorModal() { generatePassword(); openModal('modalGenerator'); }
 function openSettingsModal() { openModal('modalSettings'); }
-
-
 
 function showToast(msg, type = 'info') {
   const container = document.getElementById('toastContainer');
@@ -516,8 +773,17 @@ function getItemIcon(type, mime, cat) {
   return '📄';
 }
 
+function getFileIconByExt(filename) {
+  const ext = filename.split('.').pop().toLowerCase();
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return '🖼️';
+  if (['pdf'].includes(ext)) return '📕';
+  if (['zip', 'tar', 'gz', '7z'].includes(ext)) return '📦';
+  if (['txt', 'md', 'json', 'py', 'js', 'html', 'css'].includes(ext)) return '📝';
+  return '📄';
+}
+
 function formatBytes(bytes) {
-  if (bytes === 0) return '0 B';
+  if (!bytes || bytes === 0) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));

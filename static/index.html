@@ -11,6 +11,15 @@
 </head>
 <body class="bg-dark">
 
+  <!-- Fullscreen Global Drag & Drop Overlay -->
+  <div id="globalDropOverlay" class="global-drop-overlay hidden">
+    <div class="global-drop-card glass-card">
+      <div class="drop-pulse-icon">📥</div>
+      <h2>Drop files to Encrypt</h2>
+      <p>Release anywhere to add encrypted file(s) into your Aegis Vault</p>
+    </div>
+  </div>
+
   <!-- Top App Navigation -->
   <header class="app-header glass-card">
     <div class="header-brand">
@@ -28,12 +37,15 @@
     </div>
 
     <div class="header-actions">
+      <button id="btnHotkeys" class="btn btn-secondary hidden" onclick="openModal('modalHotkeys')" title="Keyboard Shortcuts (⌨️)">
+        ⌨️ Shortcuts
+      </button>
       <div id="vaultStatusBadge" class="status-badge status-locked">
         <span class="status-dot"></span>
         <span id="statusText">Locked</span>
       </div>
-      <button id="btnLock" class="btn btn-secondary hidden" onclick="lockVault()">
-        🔒 Lock Vault
+      <button id="btnLock" class="btn btn-secondary hidden" onclick="lockVault()" title="Lock Vault (Ctrl+L)">
+        🔒 Lock
       </button>
       <button id="btnSettings" class="btn btn-icon hidden" onclick="openSettingsModal()" title="Vault Settings & Export">
         ⚙️
@@ -133,7 +145,7 @@
           <div class="stat-icon">🔐</div>
           <div>
             <div class="stat-value">AES-256-GCM</div>
-            <div class="stat-label">Authenticated Cipher</div>
+            <div class="stat-label">Argon2id KDF</div>
           </div>
         </div>
 
@@ -150,15 +162,25 @@
       <div class="toolbar glass-card">
         <div class="search-box">
           <span class="search-icon">🔍</span>
-          <input type="text" id="searchInput" placeholder="Search stored files, notes, credentials..." oninput="renderItems()">
+          <input type="text" id="searchInput" placeholder="Search stored files, notes, credentials (Ctrl+F)..." oninput="renderItems()">
+        </div>
+
+        <div class="sort-box">
+          <select id="sortSelect" onchange="renderItems()" class="sort-select">
+            <option value="newest">📅 Newest First</option>
+            <option value="oldest">⌛ Oldest First</option>
+            <option value="name">🔤 Name (A-Z)</option>
+            <option value="size">📊 Size (Largest)</option>
+          </select>
         </div>
 
         <div class="category-filters" id="categoryFilters">
-          <button class="chip active" onclick="setCategoryFilter('All')">All</button>
-          <button class="chip" onclick="setCategoryFilter('Documents')">📄 Documents</button>
-          <button class="chip" onclick="setCategoryFilter('Notes')">📝 Notes</button>
-          <button class="chip" onclick="setCategoryFilter('Passwords')">🔑 Passwords</button>
-          <button class="chip" onclick="setCategoryFilter('Personal')">🔒 Personal</button>
+          <button class="chip active" onclick="setCategoryFilter('All')">All <span class="chip-count" id="cntAll">0</span></button>
+          <button class="chip" onclick="setCategoryFilter('Favorites')">⭐ Favorites <span class="chip-count" id="cntFav">0</span></button>
+          <button class="chip" onclick="setCategoryFilter('Documents')">📄 Documents <span class="chip-count" id="cntDoc">0</span></button>
+          <button class="chip" onclick="setCategoryFilter('Notes')">📝 Notes <span class="chip-count" id="cntNote">0</span></button>
+          <button class="chip" onclick="setCategoryFilter('Passwords')">🔑 Passwords <span class="chip-count" id="cntPass">0</span></button>
+          <button class="chip" onclick="setCategoryFilter('Personal')">🔒 Personal <span class="chip-count" id="cntPers">0</span></button>
         </div>
 
         <div class="action-buttons">
@@ -184,6 +206,11 @@
         <div class="empty-icon">📂</div>
         <h3>No Encrypted Items Found</h3>
         <p>Your vault is ready! Encrypt your first document, confidential image, or secret note.</p>
+
+        <div class="drop-hint-banner">
+          💡 <strong>Pro-Tip</strong>: Drag and drop files anywhere on this page to encrypt them instantly!
+        </div>
+
         <div class="empty-actions">
           <button class="btn btn-primary" onclick="openUploadModal()">Encrypt a File</button>
           <button class="btn btn-secondary" onclick="openNoteModal()">Create a Note</button>
@@ -198,25 +225,20 @@
   <div id="modalUpload" class="modal-overlay hidden" onclick="closeModalOnOverlay(event, 'modalUpload')">
     <div class="modal-card glass-card">
       <div class="modal-header">
-        <h3>📥 Encrypt & Store File</h3>
+        <h3>📥 Encrypt & Store File(s)</h3>
         <button class="btn-close" onclick="closeModal('modalUpload')">✕</button>
       </div>
 
       <div class="modal-body">
         <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleFileDrop(event)">
           <div class="drop-icon">📁</div>
-          <p><strong>Drag & drop a file here</strong> or click to browse</p>
-          <span class="drop-hint">Supports PDFs, images, documents, archives, code (Max 100MB)</span>
-          <input type="file" id="fileInput" class="hidden" onchange="handleFileSelect(event)">
+          <p><strong>Drag & drop file(s) here</strong> or click to browse</p>
+          <span class="drop-hint">Supports PDFs, images, documents, archives, code (Multi-file enabled)</span>
+          <input type="file" id="fileInput" class="hidden" multiple onchange="handleFileSelect(event)">
         </div>
 
-        <div id="selectedFileInfo" class="selected-file-info hidden">
-          <span class="file-badge">📄</span>
-          <div class="file-meta">
-            <div id="selectedFileName" class="file-name">filename.pdf</div>
-            <div id="selectedFileSize" class="file-size">0 KB</div>
-          </div>
-          <button class="btn-sm btn-danger" onclick="clearSelectedFile()">Clear</button>
+        <div id="selectedFileList" class="selected-file-list hidden">
+          <!-- Populated dynamically -->
         </div>
 
         <div class="form-group">
@@ -283,7 +305,10 @@
   <div id="modalViewItem" class="modal-overlay hidden" onclick="closeModalOnOverlay(event, 'modalViewItem')">
     <div class="modal-card glass-card modal-lg">
       <div class="modal-header">
-        <h3 id="viewItemTitle">Item Details</h3>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <h3 id="viewItemTitle">Item Details</h3>
+          <button id="btnFavModal" class="btn-fav-star" onclick="toggleActiveItemFavorite()" title="Toggle Favorite">⭐</button>
+        </div>
         <button class="btn-close" onclick="closeModal('modalViewItem')">✕</button>
       </div>
 
@@ -313,7 +338,13 @@
           <button class="btn btn-secondary" onclick="copyGenPassword()">📋 Copy</button>
         </div>
 
-        <div class="form-group">
+        <div class="entropy-badge-box">
+          <span class="entropy-label">Entropy:</span>
+          <span id="entropyValue" class="entropy-val">128 bits</span>
+          <span id="entropyRating" class="entropy-tag tag-strong">Very Strong</span>
+        </div>
+
+        <div class="form-group" style="margin-top: 1rem;">
           <label>Length: <span id="lenValue">20</span> characters</label>
           <input type="range" id="genLength" min="8" max="64" value="20" oninput="document.getElementById('lenValue').innerText = this.value; generatePassword();">
         </div>
@@ -327,7 +358,8 @@
       </div>
 
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="generatePassword()">🔄 Regenerate</button>
+        <button class="btn btn-secondary" onclick="saveGenAsNote()">📝 Save as Secret Note</button>
+        <button class="btn btn-outline" onclick="generatePassword()">🔄 Regenerate</button>
         <button class="btn btn-primary" onclick="closeModal('modalGenerator')">Done</button>
       </div>
     </div>
@@ -342,7 +374,6 @@
       </div>
 
       <div class="modal-body">
-
 
         <div class="settings-block">
           <h4>💾 Backup Encrypted Vault File</h4>
@@ -370,6 +401,30 @@
 
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeModal('modalSettings')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Keyboard Shortcuts Legend -->
+  <div id="modalHotkeys" class="modal-overlay hidden" onclick="closeModalOnOverlay(event, 'modalHotkeys')">
+    <div class="modal-card glass-card">
+      <div class="modal-header">
+        <h3>⌨️ Keyboard Shortcuts</h3>
+        <button class="btn-close" onclick="closeModal('modalHotkeys')">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="hotkey-list">
+          <div class="hotkey-item"><kbd>Ctrl</kbd> + <kbd>F</kbd> <span>Focus Search Bar</span></div>
+          <div class="hotkey-item"><kbd>Ctrl</kbd> + <kbd>L</kbd> <span>Lock Vault Immediately</span></div>
+          <div class="hotkey-item"><kbd>Ctrl</kbd> + <kbd>N</kbd> <span>Add New Secret Note</span></div>
+          <div class="hotkey-item"><kbd>Ctrl</kbd> + <kbd>U</kbd> <span>Encrypt File Upload</span></div>
+          <div class="hotkey-item"><kbd>Esc</kbd> <span>Close Active Modal</span></div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="closeModal('modalHotkeys')">Got it</button>
       </div>
     </div>
   </div>

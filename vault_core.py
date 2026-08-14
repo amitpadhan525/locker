@@ -207,9 +207,19 @@ class VaultCore:
     @classmethod
     def delete_item(cls, vault_data: Dict[str, Any], item_id: str) -> bool:
         """Removes an item from vault data by ID."""
-        if item_id in vault_data["items"]:
+        if item_id in vault_data.get("items", {}):
             del vault_data["items"][item_id]
             return True
+        return False
+
+    @classmethod
+    def toggle_favorite(cls, vault_data: Dict[str, Any], item_id: str) -> bool:
+        """Toggles the favorite state of an item by ID."""
+        items = vault_data.get("items", {})
+        if item_id in items:
+            items[item_id]["favorite"] = not items[item_id].get("favorite", False)
+            items[item_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+            return items[item_id]["favorite"]
         return False
 
     @classmethod

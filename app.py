@@ -184,23 +184,35 @@ class VaultHTTPRequestHandler(BaseHTTPRequestHandler):
                 return
 
             items_list = []
+            category_counts = {"All": 0, "Favorites": 0, "Documents": 0, "Notes": 0, "Passwords": 0, "Personal": 0}
             for item_id, item in session.vault_data.get("items", {}).items():
+                is_fav = item.get("favorite", False)
+                cat = item.get("category", "Documents")
+                
+                category_counts["All"] += 1
+                if is_fav:
+                    category_counts["Favorites"] += 1
+                if cat in category_counts:
+                    category_counts[cat] += 1
+                else:
+                    category_counts[cat] = 1
+
                 items_list.append({
                     "id": item.get("id"),
                     "type": item.get("type"),
                     "name": item.get("name"),
-                    "category": item.get("category"),
+                    "category": cat,
                     "mime_type": item.get("mime_type"),
                     "size": item.get("size", 0),
                     "created_at": item.get("created_at"),
                     "updated_at": item.get("updated_at"),
                     "notes": item.get("notes", ""),
-                    "favorite": item.get("favorite", False)
+                    "favorite": is_fav
                 })
 
             # Sort by created_at descending
             items_list.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-            self.send_json(200, {"items": items_list, "success": True})
+            self.send_json(200, {"items": items_list, "counts": category_counts, "success": True})
 
         elif path.startswith("/api/item/"):
             if not session.is_unlocked():
@@ -330,6 +342,49 @@ class VaultHTTPRequestHandler(BaseHTTPRequestHandler):
                 self.send_json(200, {"item_id": item_id, "message": "Note encrypted and saved", "success": True})
             except Exception as e:
                 self.send_error_json(500, f"Error saving note: {e}")
+
+        elif path == "/api/favorite":
+            if not session.is_unlocked():
+                self.send_error_json(401, "Vault is locked")
+                return
+
+            item_id = body.get("item_id", "")
+            if not item_id:
+                self.send_error_json(400, "Item ID required")
+                return
+
+            is_fav = VaultCore.toggle_favorite(session.vault_data, item_id)
+            session.save()
+            self.send_json(200, {"item_id": item_id, "favorite": is_fav, "message": "Favorite updated", "success": True})
+
+        elif path == "/api/batch-upload":
+            if not session.is_unlocked():
+                self.send_error_json(401, "Vault is locked")
+                return
+
+            files = body.get("files", [])
+            if not files or not isinstance(files, list):
+                self.send_error_json(400, "Files array required")
+                return
+
+            added_ids = []
+            try:
+                for file_info in files:
+                    filename = file_info.get("filename", "file.bin")
+                    b64_data = file_info.get("data_b64", "")
+                    category = file_info.get("category", "Documents")
+                    notes = file_info.get("notes", "")
+                    mime_type = file_info.get("mime_type", "application/octet-stream")
+
+                    if b64_data:
+                        file_bytes = base64.b64decode(b64_data.encode('utf-8'))
+                        item_id = VaultCore.add_file_item(session.vault_data, filename, file_bytes, category=category, notes=notes, mime_type=mime_type)
+                        added_ids.append(item_id)
+
+                session.save()
+                self.send_json(200, {"added_count": len(added_ids), "item_ids": added_ids, "message": f"{len(added_ids)} files encrypted & stored", "success": True})
+            except Exception as e:
+                self.send_error_json(500, f"Error processing batch upload: {e}")
 
         elif path == "/api/change-password":
             if not session.is_unlocked():

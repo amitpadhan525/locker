@@ -94,6 +94,20 @@ class TestVaultCore(unittest.TestCase):
         _, _, _, data = VaultCore.unlock_vault(self.vault_path, new_password)
         self.assertIn("items", data)
 
+    def test_toggle_favorite(self):
+        master_key, salt, kdf_type, vault_data = VaultCore.create_vault(self.vault_path, self.master_password)
+        item_id = VaultCore.add_note_item(vault_data, "Favorite Note", "Super Secret")
+        
+        # Toggle on
+        is_fav = VaultCore.toggle_favorite(vault_data, item_id)
+        self.assertTrue(is_fav)
+        self.assertTrue(vault_data["items"][item_id]["favorite"])
+
+        # Toggle off
+        is_fav_off = VaultCore.toggle_favorite(vault_data, item_id)
+        self.assertFalse(is_fav_off)
+        self.assertFalse(vault_data["items"][item_id]["favorite"])
+
 
 if __name__ == "__main__":
     unittest.main()
