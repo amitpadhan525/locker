@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Locker - Encrypted Storage Vault
-100% Offline, Native Desktop GUI Application (Tkinter/TTK)
+Locker - Encrypted Storage Vault & Virtual Drive Mount
+100% Offline, Native Desktop Application (Tkinter/TTK)
 Zero Cloud Access, Zero HTTP Server, Zero Open Ports.
 """
 
@@ -13,6 +13,8 @@ import base64
 import random
 import string
 import math
+import subprocess
+import platform
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -20,6 +22,20 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
 from vault_core import VaultCore, VaultSecurityError, DEFAULT_VAULT_FILE
+
+
+def open_in_file_manager(folder_path: str):
+    """Launches the native OS file manager pointing to the specified directory."""
+    system = platform.system()
+    try:
+        if system == "Linux":
+            subprocess.Popen(["xdg-open", folder_path])
+        elif system == "Windows":
+            os.startfile(folder_path)
+        elif system == "Darwin":
+            subprocess.Popen(["open", folder_path])
+    except Exception as e:
+        print(f"Error launching OS file manager for {folder_path}: {e}")
 
 
 class VaultSession:
@@ -32,6 +48,7 @@ class VaultSession:
         self.vault_data: Optional[Dict[str, Any]] = None
         self.last_activity: float = time.time()
         self.auto_lock_seconds: int = 900  # 15 minutes auto-lock timeout
+        self.mount_dir: Optional[str] = None
 
     def is_initialized(self) -> bool:
         return os.path.exists(self.vault_path)
@@ -48,6 +65,16 @@ class VaultSession:
         self.last_activity = time.time()
 
     def lock(self):
+        if self.mount_dir and os.path.exists(self.mount_dir):
+            try:
+                VaultCore.sync_dir_to_vault(self.vault_data, self.mount_dir)
+                if self.master_key and self.vault_data:
+                    VaultCore.save_vault(self.vault_path, self.master_key, self.salt, self.kdf_type, self.vault_data)
+            except Exception:
+                pass
+            VaultCore.secure_unmount_dir(self.mount_dir)
+            self.mount_dir = None
+
         self.master_key = None
         self.salt = None
         self.kdf_type = None
@@ -75,16 +102,39 @@ class VaultSession:
     def save(self):
         if not self.is_unlocked():
             raise VaultSecurityError("Vault is locked. Cannot save changes.")
+        if self.mount_dir and os.path.exists(self.mount_dir):
+            VaultCore.sync_dir_to_vault(self.vault_data, self.mount_dir)
         VaultCore.save_vault(self.vault_path, self.master_key, self.salt, self.kdf_type, self.vault_data)
         self.touch()
+
+    def mount_virtual_drive((self)) -> str:
+        """Mounts vault contents to /tmp/locker_mounts/<vault_name> and returns path."""
+        if not self.is_unlocked():
+            raise VaultSecurityError("Vault is locked. Cannot mount drive.")
+
+        vault_name = Path(self.vault_path).stem
+        target_dir = os.path.join("/tmp", "locker_mounts", vault_name)
+        
+        VaultCore.mount_vault_to_dir(self.vault_data, target_dir)
+        self.mount_dir = target_dir
+        return target_dir
+
+    def unmount_virtual_drive(self):
+        if self.mount_dir and os.path.exists(self.mount_dir):
+            if self.is_unlocked():
+                VaultCore.sync_dir_to_vault(self.vault_data, self.mount_dir)
+                self.save()
+            VaultCore.secure_unmount_dir(self.mount_dir)
+            self.mount_dir = None
 
 
 class LockerApp(tk.Tk):
     """Native Desktop GUI Application for Locker Encrypted Storage Vault."""
 
-    def __init__(self, vault_path: str = DEFAULT_VAULT_FILE):
+    def __init__(self, vault_path: str = DEFAULT_VAULT_FILE, auto_mount: bool = False):
         super().__init__()
         self.session = VaultSession(vault_path)
+        self.auto_mount = auto_mount
 
         self.title(f"Locker - Encrypted Storage Vault [{os.path.basename(self.session.vault_path)}]")
         self.geometry("1020x660")
@@ -111,11 +161,19 @@ class LockerApp(tk.Tk):
         self.current_category = "All"
         self.search_query = ""
 
+        # Protocol for graceful window closing (unmount virtual drive if active)
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
         # Container Frame
         self.container = tk.Frame(self, bg=self.colors["bg"])
         self.container.pack(fill="both", expand=True)
 
         self.show_auth_screen()
+
+    def on_close(self):
+        if self.session.is_unlocked():
+            self.session.lock()
+        self.destroy()
 
     def setup_styles(self):
         style = ttk.Style(self)
@@ -231,7 +289,7 @@ class LockerApp(tk.Tk):
         self.lbl_auth_error = tk.Label(card, text="", font=("Helvetica", 9), fg=self.colors["danger"], bg=self.colors["card"])
         self.lbl_auth_error.pack(anchor="w", pady=(0, 10))
 
-        btn_text = "🚀 Initialize Vault" if not is_existing else "🔓 Unlock Vault"
+        btn_text = "🚀 Initialize Vault" if not is_existing else "🔓 Unlock & Open Vault"
         btn_submit = tk.Button(
             card,
             text=btn_text,
@@ -278,12 +336,28 @@ class LockerApp(tk.Tk):
                 self.session.unlock(pwd)
             else:
                 self.session.create(pwd)
+
+            if self.auto_mount or True:  # Auto mount and open file manager on unlock
+                self.mount_and_open_file_manager()
+
             self.show_dashboard()
         except VaultSecurityError:
             self.lbl_auth_error.config(text="Incorrect password. Access denied.", fg=self.colors["danger"])
             self.entry_pwd.delete(0, tk.END)
         except Exception as e:
             self.lbl_auth_error.config(text=f"Error: {str(e)}", fg=self.colors["danger"])
+
+    def mount_and_open_file_manager(self):
+        """Mounts vault to /tmp/locker_mounts and opens system file manager."""
+        try:
+            mount_path = self.session.mount_virtual_drive()
+            open_in_file_manager(mount_path)
+            messagebox.showinfo(
+                "Vault Mounted as Virtual Drive",
+                f"🟢 Vault successfully mounted to:\n  {mount_path}\n\nOpened in your File Manager! You can browse, edit, and save files natively."
+            )
+        except Exception as e:
+            messagebox.showerror("Mount Error", f"Failed to mount virtual drive: {e}")
 
     def show_dashboard(self):
         for widget in self.container.winfo_children():
@@ -311,7 +385,21 @@ class LockerApp(tk.Tk):
         ctrl_frame.pack(side="right")
 
         self.lbl_stats = tk.Label(ctrl_frame, text="", font=("Helvetica", 9), fg=self.colors["muted"], bg=self.colors["card"])
-        self.lbl_stats.pack(side="left", padx=(0, 15))
+        self.lbl_stats.pack(side="left", padx=(0, 12))
+
+        btn_mount_fm = tk.Button(
+            ctrl_frame,
+            text="📁 Open File Manager",
+            command=self.mount_and_open_file_manager,
+            bg=self.colors["primary_dark"],
+            fg="#ffffff",
+            font=("Helvetica", 9, "bold"),
+            relief="flat",
+            padx=12,
+            pady=4,
+            cursor="hand2"
+        )
+        btn_mount_fm.pack(side="left", padx=(0, 8))
 
         btn_settings = tk.Button(
             ctrl_frame,
@@ -328,7 +416,7 @@ class LockerApp(tk.Tk):
 
         btn_lock = tk.Button(
             ctrl_frame,
-            text="🔒 Lock",
+            text="🔒 Lock & Unmount",
             command=self.lock_vault,
             bg=self.colors["danger"],
             fg="#ffffff",
@@ -955,7 +1043,7 @@ class LockerApp(tk.Tk):
                 with open(out_path, "w", encoding="utf-8") as f:
                     f.write(item.get("content", ""))
             else:
-                raw_bytes = base64.b64decode(item.get("data", ""))
+                raw_bytes = base64.b64decode(item.get("data_b64", item.get("data", "")))
                 with open(out_path, "wb") as f:
                     f.write(raw_bytes)
             messagebox.showinfo("Success", f"Decrypted item saved to:\n{out_path}")
@@ -1025,14 +1113,18 @@ class LockerApp(tk.Tk):
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Locker - Encrypted Storage Vault (100% Offline Native Desktop App)")
+    parser = argparse.ArgumentParser(description="Locker - Encrypted Storage Vault & Virtual Drive Mount")
     parser.add_argument("vault_file", nargs="?", default=None, help="Path to .locker or .vault file to open")
     parser.add_argument("--vault", default=None, help="Path to .locker or .vault file")
+    parser.add_argument("--mount", action="store_true", help="Auto-mount vault into OS File Manager on unlock")
 
     args = parser.parse_args()
     target_vault = args.vault or args.vault_file or DEFAULT_VAULT_FILE
 
-    app = LockerApp(target_vault)
+    # If launched with a target file or --mount flag, auto-mount upon unlocking
+    auto_mount = bool(args.vault or args.vault_file or args.mount)
+
+    app = LockerApp(target_vault, auto_mount=auto_mount)
     app.mainloop()
 
 

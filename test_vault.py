@@ -108,6 +108,33 @@ class TestVaultCore(unittest.TestCase):
         self.assertFalse(is_fav_off)
         self.assertFalse(vault_data["items"][item_id]["favorite"])
 
+    def test_mount_sync_unmount(self):
+        master_key, salt, kdf_type, vault_data = VaultCore.create_vault(self.vault_path, self.master_password)
+        note_id = VaultCore.add_note_item(vault_data, "TestNote", "Initial Content")
+
+        mount_dir = os.path.join(self.temp_dir.name, "test_mount")
+        index_map = VaultCore.mount_vault_to_dir(vault_data, mount_dir)
+        self.assertTrue(os.path.exists(mount_dir))
+
+        # Check extracted file content
+        note_path = os.path.join(mount_dir, "Notes", "TestNote.txt")
+        self.assertTrue(os.path.exists(note_path))
+        with open(note_path, "r") as f:
+            self.assertEqual(f.read(), "Initial Content")
+
+        # Edit note in mounted dir
+        with open(note_path, "w") as f:
+            f.write("Updated Content via File Manager")
+
+        # Sync back to vault
+        VaultCore.sync_dir_to_vault(vault_data, mount_dir)
+        self.assertEqual(vault_data["items"][note_id]["content"], "Updated Content via File Manager")
+
+        # Unmount & Wipe
+        VaultCore.secure_unmount_dir(mount_dir)
+        self.assertFalse(os.path.exists(mount_dir))
+
 
 if __name__ == "__main__":
     unittest.main()
+

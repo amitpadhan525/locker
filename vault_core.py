@@ -232,3 +232,123 @@ class VaultCore:
 
         cls.save_vault(filepath, new_master_key, new_salt, kdf_type, vault_data)
         return new_master_key, new_salt, kdf_type, vault_data
+
+    @classmethod
+    def mount_vault_to_dir(cls, vault_data: Dict[str, Any], target_dir: str) -> Dict[str, str]:
+        """
+        Exports decrypted vault items into target_dir with secure permissions (0o700).
+        Returns a dictionary mapping relative file paths to item IDs.
+        """
+        path_obj = Path(target_dir)
+        path_obj.mkdir(parents=True, exist_ok=True)
+        os.chmod(target_dir, 0o700)
+
+        index_map = {}
+        items = vault_data.get("items", {})
+
+        for item_id, item in items.items():
+            cat = item.get("category", "General")
+            cat_dir = path_obj / cat
+            cat_dir.mkdir(parents=True, exist_ok=True)
+            os.chmod(cat_dir, 0o700)
+
+            b64_str = item.get("data_b64", "")
+            content_bytes = base64.b64decode(b64_str.encode('utf-8')) if b64_str else item.get("content", "").encode('utf-8')
+
+            if item.get("type") == "note":
+                filename = f"{item.get('name', 'note')}.txt"
+            else:
+                filename = item.get("filename", item.get("name", "file"))
+
+            file_path = cat_dir / filename
+            with open(file_path, "wb") as f:
+                f.write(content_bytes)
+            os.chmod(file_path, 0o600)
+
+            rel_path = str(file_path.relative_to(path_obj))
+            index_map[rel_path] = item_id
+
+        index_file = path_obj / ".locker_index.json"
+        with open(index_file, "w", encoding="utf-8") as f:
+            json.dump(index_map, f, indent=2)
+        os.chmod(index_file, 0o600)
+
+        return index_map
+
+    @classmethod
+    def sync_dir_to_vault(cls, vault_data: Dict[str, Any], target_dir: str):
+        """
+        Scans target_dir for new, updated, or deleted files and syncs them back into vault_data.
+        """
+        path_obj = Path(target_dir)
+        index_file = path_obj / ".locker_index.json"
+
+        index_map = {}
+        if index_file.exists():
+            with open(index_file, "r", encoding="utf-8") as f:
+                index_map = json.load(f)
+
+        scanned_rel_paths = set()
+
+        for root, dirs, files in os.walk(target_dir):
+            for file in files:
+                if file.startswith(".locker_index"):
+                    continue
+                full_p = Path(root) / file
+                rel_p = str(full_p.relative_to(path_obj))
+                scanned_rel_paths.add(rel_p)
+
+                with open(full_p, "rb") as f:
+                    raw_data = f.read()
+
+                # If file existed previously, update it
+                if rel_p in index_map:
+                    item_id = index_map[rel_p]
+                    if item_id in vault_data.get("items", {}):
+                        item = vault_data["items"][item_id]
+                        b64_data = base64.b64encode(raw_data).decode('utf-8')
+                        if item.get("type") == "note":
+                            item["content"] = raw_data.decode('utf-8', errors='ignore')
+                        item["data_b64"] = b64_data
+                        item["size"] = len(raw_data)
+                        item["updated_at"] = datetime.now(timezone.utc).isoformat()
+                else:
+                    # New file created in mounted folder
+                    cat = full_p.parent.name if full_p.parent != path_obj else "Documents"
+                    item_id = cls.add_file_item(vault_data, str(full_p), category=cat)
+                    index_map[rel_p] = item_id
+
+        # Handle deleted files
+        for rel_p, item_id in list(index_map.items()):
+            if rel_p not in scanned_rel_paths:
+                cls.delete_item(vault_data, item_id)
+                del index_map[rel_p]
+
+    @classmethod
+    def secure_unmount_dir(cls, target_dir: str):
+        """Safely wipes temporary unencrypted files and removes target_dir."""
+        path_obj = Path(target_dir)
+        if not path_obj.exists():
+            return
+
+        for root, dirs, files in os.walk(target_dir, topdown=False):
+            for f in files:
+                fp = os.path.join(root, f)
+                try:
+                    size = os.path.getsize(fp)
+                    with open(fp, "ba+", buffering=0) as file_obj:
+                        file_obj.write(b"\x00" * size)
+                    os.remove(fp)
+                except Exception:
+                    pass
+            for d in dirs:
+                try:
+                    os.rmdir(os.path.join(root, d))
+                except Exception:
+                    pass
+
+        try:
+            os.rmdir(target_dir)
+        except Exception:
+            pass
+
