@@ -134,6 +134,35 @@ class TestVaultCore(unittest.TestCase):
         VaultCore.secure_unmount_dir(mount_dir)
         self.assertFalse(os.path.exists(mount_dir))
 
+    def test_custom_folders_persistence(self):
+        master_key, salt, kdf_type, vault_data = VaultCore.create_vault(self.vault_path, self.master_password)
+
+        mount_dir = os.path.join(self.temp_dir.name, "test_folder_mount")
+        VaultCore.mount_vault_to_dir(vault_data, mount_dir)
+
+        # Create custom folder structure (including empty folder) in mounted dir
+        custom_folder = os.path.join(mount_dir, "MyCustomFolder", "SubFolder")
+        os.makedirs(custom_folder, exist_ok=True)
+        file_in_folder = os.path.join(custom_folder, "test_file.txt")
+        with open(file_in_folder, "w") as f:
+            f.write("inside custom folder")
+
+        empty_folder = os.path.join(mount_dir, "EmptyFolder")
+        os.makedirs(empty_folder, exist_ok=True)
+
+        # Sync back to vault
+        VaultCore.sync_dir_to_vault(vault_data, mount_dir)
+        VaultCore.secure_unmount_dir(mount_dir)
+
+        # Re-mount in new dir
+        remount_dir = os.path.join(self.temp_dir.name, "test_folder_remount")
+        VaultCore.mount_vault_to_dir(vault_data, remount_dir)
+
+        self.assertTrue(os.path.exists(os.path.join(remount_dir, "MyCustomFolder", "SubFolder", "test_file.txt")))
+        self.assertTrue(os.path.exists(os.path.join(remount_dir, "EmptyFolder")))
+
+        VaultCore.secure_unmount_dir(remount_dir)
+
 
 if __name__ == "__main__":
     unittest.main()

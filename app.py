@@ -7,6 +7,7 @@ Zero Cloud Access, Zero HTTP Server, Zero Open Ports.
 
 import sys
 import os
+import re
 import time
 import json
 import base64
@@ -15,6 +16,8 @@ import string
 import math
 import subprocess
 import platform
+import shutil
+import getpass
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -29,13 +32,58 @@ def open_in_file_manager(folder_path: str):
     system = platform.system()
     try:
         if system == "Linux":
-            subprocess.Popen(["xdg-open", folder_path])
+            file_managers = ["thunar", "nautilus", "dolphin", "pcmanfm", "nemo", "caja", "spacefm"]
+            launched = False
+            for fm in file_managers:
+                if shutil.which(fm):
+                    subprocess.Popen([fm, folder_path])
+                    launched = True
+                    break
+            if not launched:
+                subprocess.Popen(["xdg-open", folder_path])
         elif system == "Windows":
             os.startfile(folder_path)
         elif system == "Darwin":
             subprocess.Popen(["open", folder_path])
     except Exception as e:
         print(f"Error launching OS file manager for {folder_path}: {e}")
+
+
+def add_gtk_bookmark(path: str, label: str):
+    """Adds path as a USB/Drive Bookmark in GTK sidebars (Thunar, Nautilus, PCManFM)."""
+    try:
+        uri = Path(path).as_uri()
+        line_to_add = f"{uri} {label}\n"
+        for cfg in ["~/.config/gtk-3.0", "~/.config/gtk-4.0"]:
+            folder = os.path.expanduser(cfg)
+            os.makedirs(folder, exist_ok=True)
+            bm_file = os.path.join(folder, "bookmarks")
+            lines = []
+            if os.path.exists(bm_file):
+                with open(bm_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+            if not any(uri in l for l in lines):
+                lines.append(line_to_add)
+                with open(bm_file, "w", encoding="utf-8") as f:
+                    f.writelines(lines)
+    except Exception as e:
+        print(f"Notice: Failed to register GTK sidebar bookmark: {e}")
+
+
+def remove_gtk_bookmark(path: str):
+    """Removes path from GTK sidebars (Simulates USB Eject)."""
+    try:
+        uri = Path(path).as_uri()
+        for cfg in ["~/.config/gtk-3.0", "~/.config/gtk-4.0"]:
+            bm_file = os.path.expanduser(os.path.join(cfg, "bookmarks"))
+            if os.path.exists(bm_file):
+                with open(bm_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                new_lines = [l for l in lines if uri not in l]
+                with open(bm_file, "w", encoding="utf-8") as f:
+                    f.writelines(new_lines)
+    except Exception as e:
+        print(f"Notice: Failed to remove GTK sidebar bookmark: {e}")
 
 
 class VaultSession:
@@ -49,6 +97,8 @@ class VaultSession:
         self.last_activity: float = time.time()
         self.auto_lock_seconds: int = 900  # 15 minutes auto-lock timeout
         self.mount_dir: Optional[str] = None
+        self.loop_device: Optional[str] = None
+        self.block_img_file: Optional[str] = None
 
     def is_initialized(self) -> bool:
         return os.path.exists(self.vault_path)
@@ -64,6 +114,108 @@ class VaultSession:
     def touch(self):
         self.last_activity = time.time()
 
+    def _get_existing_mount(self, vault_name: str) -> Optional[Tuple[Optional[str], str]]:
+        """Returns (loop_device, mount_path) if locker_block_<vault_name>.img is already mounted."""
+        img_file = f"/tmp/locker_block_{vault_name}.img"
+        vol_label = vault_name[:11].upper()
+        user = getpass.getuser()
+        expected_mount = f"/run/media/{user}/{vol_label}"
+
+        if os.path.exists("/proc/mounts"):
+            try:
+                with open("/proc/mounts", "r", encoding="utf-8") as f:
+                    for line in f:
+                        if img_file in line or expected_mount in line:
+                            parts = line.split()
+                            if len(parts) >= 2:
+                                dev, target = parts[0], parts[1]
+                                return (dev if dev.startswith("/dev/loop") else None), target
+            except Exception:
+                pass
+
+        if os.path.exists(expected_mount) and os.path.ismount(expected_mount):
+            return None, expected_mount
+
+        return None
+
+    def _mount_loop_block_device(self, vault_name: str) -> Optional[str]:
+        """Creates a virtual VFAT block disk image, maps loop device via udisksctl, and mounts as USB volume."""
+        # 1. Check if vault block device is already mounted (prevents duplicate mounts)
+        existing = self._get_existing_mount(vault_name)
+        if existing:
+            dev, mount_path = existing
+            self.loop_device = dev
+            self.block_img_file = f"/tmp/locker_block_{vault_name}.img"
+            return mount_path
+
+        try:
+            total_size_bytes = 0
+            if self.vault_data and "items" in self.vault_data:
+                for item in self.vault_data["items"].values():
+                    total_size_bytes += item.get("size", 1024 * 10)
+
+            size_mb = max(32, int((total_size_bytes / (1024 * 1024)) + 32))
+            img_file = f"/tmp/locker_block_{vault_name}.img"
+            if os.path.exists(img_file):
+                try:
+                    os.remove(img_file)
+                except Exception:
+                    pass
+
+            subprocess.run(["truncate", "-s", f"{size_mb}M", img_file], check=True, capture_output=True)
+
+            vol_label = vault_name[:11].upper()
+            subprocess.run(["mkfs.vfat", "-n", vol_label, img_file], check=True, capture_output=True)
+
+            res_loop = subprocess.run(["udisksctl", "loop-setup", "-f", img_file], capture_output=True, text=True, check=True)
+            match = re.search(r"(/dev/loop\d+)", res_loop.stdout)
+            if not match:
+                return None
+            loop_dev = match.group(1)
+
+            res_mount = subprocess.run(["udisksctl", "mount", "-b", loop_dev], capture_output=True, text=True, check=True)
+            match_path = re.search(r"at\s+(/\S+)", res_mount.stdout)
+            if not match_path:
+                subprocess.run(["udisksctl", "loop-delete", "-b", loop_dev], capture_output=True)
+                return None
+
+            mount_path = match_path.group(1).rstrip(".")
+
+            self.loop_device = loop_dev
+            self.block_img_file = img_file
+            return mount_path
+        except Exception as e:
+            print(f"Notice: Block device udisksctl mount failed ({e}), falling back to media directory.")
+            return None
+
+    def _unmount_loop_block_device(self):
+        """Unmounts and detaches udisksctl loop block device and cleans up disk image."""
+        vault_name = Path(self.vault_path).stem
+        existing = self._get_existing_mount(vault_name)
+
+        loop_dev = self.loop_device
+        if not loop_dev and existing and existing[0]:
+            loop_dev = existing[0]
+
+        if loop_dev:
+            try:
+                subprocess.run(["udisksctl", "unmount", "-b", loop_dev], capture_output=True)
+            except Exception:
+                pass
+            try:
+                subprocess.run(["udisksctl", "loop-delete", "-b", loop_dev], capture_output=True)
+            except Exception:
+                pass
+            self.loop_device = None
+
+        img_file = self.block_img_file or f"/tmp/locker_block_{vault_name}.img"
+        if img_file and os.path.exists(img_file):
+            try:
+                os.remove(img_file)
+            except Exception:
+                pass
+            self.block_img_file = None
+
     def lock(self):
         if self.mount_dir and os.path.exists(self.mount_dir):
             try:
@@ -72,6 +224,8 @@ class VaultSession:
                     VaultCore.save_vault(self.vault_path, self.master_key, self.salt, self.kdf_type, self.vault_data)
             except Exception:
                 pass
+            remove_gtk_bookmark(self.mount_dir)
+            self._unmount_loop_block_device()
             VaultCore.secure_unmount_dir(self.mount_dir)
             self.mount_dir = None
 
@@ -107,16 +261,66 @@ class VaultSession:
         VaultCore.save_vault(self.vault_path, self.master_key, self.salt, self.kdf_type, self.vault_data)
         self.touch()
 
-    def mount_virtual_drive((self)) -> str:
-        """Mounts vault contents to /tmp/locker_mounts/<vault_name> and returns path."""
+    def mount_virtual_drive(self) -> str:
+        """Mounts vault contents to media USB drive directory and registers volume."""
         if not self.is_unlocked():
             raise VaultSecurityError("Vault is locked. Cannot mount drive.")
 
         vault_name = Path(self.vault_path).stem
-        target_dir = os.path.join("/tmp", "locker_mounts", vault_name)
-        
+
+        # 1. If vault block device is ALREADY mounted, sync and return existing mount
+        existing = self._get_existing_mount(vault_name)
+        if existing:
+            dev, mount_path = existing
+            self.loop_device = dev
+            self.block_img_file = f"/tmp/locker_block_{vault_name}.img"
+            self.mount_dir = mount_path
+            try:
+                VaultCore.sync_dir_to_vault(self.vault_data, mount_path)
+                self.save()
+            except Exception:
+                pass
+            return mount_path
+
+        # 2. Fresh mount: setup loop device
+        target_dir = self._mount_loop_block_device(vault_name)
+
+        if not target_dir:
+            user = getpass.getuser()
+            candidate_dirs = [
+                os.path.join("/media", user, vault_name),
+                os.path.join("/run/media", user, vault_name),
+                os.path.join("/tmp", "media", user, vault_name),
+                os.path.join("/tmp", "locker_mounts", vault_name)
+            ]
+
+            for cand in candidate_dirs:
+                try:
+                    os.makedirs(cand, exist_ok=True)
+                    target_dir = cand
+                    break
+                except Exception:
+                    continue
+
+        if not target_dir:
+            target_dir = os.path.join("/tmp", "locker_mounts", vault_name)
+            os.makedirs(target_dir, exist_ok=True)
+
         VaultCore.mount_vault_to_dir(self.vault_data, target_dir)
         self.mount_dir = target_dir
+
+        # Add Desktop metadata for USB removable icon in file managers
+        dot_directory = os.path.join(target_dir, ".directory")
+        try:
+            with open(dot_directory, "w", encoding="utf-8") as f:
+                f.write(f"[Desktop Entry]\nIcon=drive-removable-media-usb\nName=🔒 USB Drive ({vault_name})\nType=Directory\n")
+            os.chmod(dot_directory, 0o600)
+        except Exception:
+            pass
+
+        # Register in file manager sidebar under Devices/Places
+        add_gtk_bookmark(target_dir, f"🔒 USB Drive ({vault_name})")
+
         return target_dir
 
     def unmount_virtual_drive(self):
@@ -124,6 +328,8 @@ class VaultSession:
             if self.is_unlocked():
                 VaultCore.sync_dir_to_vault(self.vault_data, self.mount_dir)
                 self.save()
+            remove_gtk_bookmark(self.mount_dir)
+            self._unmount_loop_block_device()
             VaultCore.secure_unmount_dir(self.mount_dir)
             self.mount_dir = None
 
@@ -170,10 +376,58 @@ class LockerApp(tk.Tk):
 
         self.show_auth_screen()
 
+        # Start background auto-sync timer (syncs folder & file changes from File Manager in real-time)
+        self.after(2000, self.start_auto_sync_timer)
+
+    def start_auto_sync_timer(self):
+        """Periodically syncs mounted USB drive changes to encrypted vault every 2 seconds."""
+        try:
+            if hasattr(self, 'session') and self.session.is_unlocked() and self.session.mount_dir:
+                if os.path.exists(self.session.mount_dir):
+                    VaultCore.sync_dir_to_vault(self.session.vault_data, self.session.mount_dir)
+                    VaultCore.save_vault(
+                        self.session.vault_path,
+                        self.session.master_key,
+                        self.session.salt,
+                        self.session.kdf_type,
+                        self.session.vault_data
+                    )
+                    if hasattr(self, 'tree') and self.tree.winfo_exists():
+                        self.refresh_items()
+        except Exception:
+            pass
+        finally:
+            self.after(2000, self.start_auto_sync_timer)
+
     def on_close(self):
-        if self.session.is_unlocked():
-            self.session.lock()
-        self.destroy()
+        if self.session.is_unlocked() and self.session.mount_dir:
+            try:
+                VaultCore.sync_dir_to_vault(self.session.vault_data, self.session.mount_dir)
+                self.session.save()
+            except Exception:
+                pass
+
+            answer = messagebox.askyesnocancel(
+                "Keep Virtual USB Drive Mounted?",
+                f"The Vault USB Drive is currently active in your File Manager at:\n  {self.session.mount_dir}\n\n"
+                "• Click [YES] to KEEP the USB Drive mounted & active in your File Manager.\n"
+                "• Click [NO] to LOCK & UNMOUNT the USB Drive now.\n"
+                "• Click [CANCEL] to stay in Locker.",
+                parent=self
+            )
+            if answer is True:
+                print(f"🟢 Vault USB Drive remains mounted & active at: {self.session.mount_dir}")
+                self.destroy()
+                return
+            elif answer is False:
+                self.session.lock()
+                self.destroy()
+            else:
+                return
+        else:
+            if self.session.is_unlocked():
+                self.session.lock()
+            self.destroy()
 
     def setup_styles(self):
         style = ttk.Style(self)

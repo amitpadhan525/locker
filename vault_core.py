@@ -150,17 +150,31 @@ class VaultCore:
             raise VaultSecurityError("Invalid master password or corrupted ciphertext tag verification failed.")
 
     @classmethod
-    def add_file_item(cls, vault_data: Dict[str, Any], filename: str, file_bytes: bytes, category: str = "Documents", notes: str = "", mime_type: str = "application/octet-stream") -> str:
+    def add_file_item(cls, vault_data: Dict[str, Any], filepath_or_name: str, file_bytes: Optional[bytes] = None, category: str = "Documents", notes: str = "", mime_type: str = "application/octet-stream", rel_path: Optional[str] = None) -> str:
         """Adds an encrypted file entry to vault data."""
         item_id = str(uuid.uuid4())
+
+        if file_bytes is None:
+            file_path_obj = Path(filepath_or_name)
+            filename = file_path_obj.name
+            if os.path.exists(filepath_or_name):
+                with open(filepath_or_name, "rb") as f:
+                    file_bytes = f.read()
+            else:
+                file_bytes = b""
+        else:
+            filename = Path(filepath_or_name).name
+
         b64_data = base64.b64encode(file_bytes).decode('utf-8')
 
         now_iso = datetime.now(timezone.utc).isoformat()
+        default_rel_path = str(Path(category) / filename)
         item = {
             "id": item_id,
             "type": "file",
             "name": filename,
             "category": category,
+            "rel_path": rel_path or default_rel_path,
             "mime_type": mime_type,
             "size": len(file_bytes),
             "created_at": now_iso,
@@ -170,7 +184,7 @@ class VaultCore:
             "favorite": False
         }
 
-        vault_data["items"][item_id] = item
+        vault_data.setdefault("items", {})[item_id] = item
         return item_id
 
     @classmethod
@@ -180,11 +194,13 @@ class VaultCore:
         b64_data = base64.b64encode(content.encode('utf-8')).decode('utf-8')
 
         now_iso = datetime.now(timezone.utc).isoformat()
+        rel_path = str(Path(category) / f"{title}.txt")
         item = {
             "id": item_id,
             "type": "note",
             "name": title,
             "category": category,
+            "rel_path": rel_path,
             "mime_type": "text/plain",
             "size": len(content.encode('utf-8')),
             "created_at": now_iso,
@@ -194,7 +210,7 @@ class VaultCore:
             "favorite": False
         }
 
-        vault_data["items"][item_id] = item
+        vault_data.setdefault("items", {})[item_id] = item
         return item_id
 
     @classmethod
@@ -243,29 +259,37 @@ class VaultCore:
         path_obj.mkdir(parents=True, exist_ok=True)
         os.chmod(target_dir, 0o700)
 
+        # 1. Recreate custom folders
+        folders = vault_data.get("folders", [])
+        for rel_d in folders:
+            folder_path = path_obj / rel_d
+            folder_path.mkdir(parents=True, exist_ok=True)
+            os.chmod(folder_path, 0o700)
+
         index_map = {}
         items = vault_data.get("items", {})
 
         for item_id, item in items.items():
-            cat = item.get("category", "General")
-            cat_dir = path_obj / cat
-            cat_dir.mkdir(parents=True, exist_ok=True)
-            os.chmod(cat_dir, 0o700)
+            rel_path = item.get("rel_path")
+            if not rel_path:
+                cat = item.get("category", "General")
+                if item.get("type") == "note":
+                    filename = f"{item.get('name', 'note')}.txt"
+                else:
+                    filename = item.get("filename", item.get("name", "file"))
+                rel_path = str(Path(cat) / filename)
+
+            file_path = path_obj / rel_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            os.chmod(file_path.parent, 0o700)
 
             b64_str = item.get("data_b64", "")
             content_bytes = base64.b64decode(b64_str.encode('utf-8')) if b64_str else item.get("content", "").encode('utf-8')
 
-            if item.get("type") == "note":
-                filename = f"{item.get('name', 'note')}.txt"
-            else:
-                filename = item.get("filename", item.get("name", "file"))
-
-            file_path = cat_dir / filename
             with open(file_path, "wb") as f:
                 f.write(content_bytes)
             os.chmod(file_path, 0o600)
 
-            rel_path = str(file_path.relative_to(path_obj))
             index_map[rel_path] = item_id
 
         index_file = path_obj / ".locker_index.json"
@@ -278,7 +302,7 @@ class VaultCore:
     @classmethod
     def sync_dir_to_vault(cls, vault_data: Dict[str, Any], target_dir: str):
         """
-        Scans target_dir for new, updated, or deleted files and syncs them back into vault_data.
+        Scans target_dir for new, updated, or deleted files and directories and syncs them back into vault_data.
         """
         path_obj = Path(target_dir)
         index_file = path_obj / ".locker_index.json"
@@ -289,10 +313,18 @@ class VaultCore:
                 index_map = json.load(f)
 
         scanned_rel_paths = set()
+        scanned_rel_folders = set()
 
         for root, dirs, files in os.walk(target_dir):
+            for d in dirs:
+                if d.startswith("."):
+                    continue
+                full_d = Path(root) / d
+                rel_d = str(full_d.relative_to(path_obj))
+                scanned_rel_folders.add(rel_d)
+
             for file in files:
-                if file.startswith(".locker_index"):
+                if file.startswith(".locker_index") or file.startswith(".directory"):
                     continue
                 full_p = Path(root) / file
                 rel_p = str(full_p.relative_to(path_obj))
@@ -300,6 +332,9 @@ class VaultCore:
 
                 with open(full_p, "rb") as f:
                     raw_data = f.read()
+
+                parts = Path(rel_p).parts
+                cat = parts[0] if len(parts) > 1 else "Documents"
 
                 # If file existed previously, update it
                 if rel_p in index_map:
@@ -310,13 +345,17 @@ class VaultCore:
                         if item.get("type") == "note":
                             item["content"] = raw_data.decode('utf-8', errors='ignore')
                         item["data_b64"] = b64_data
+                        item["rel_path"] = rel_p
+                        item["category"] = cat
                         item["size"] = len(raw_data)
                         item["updated_at"] = datetime.now(timezone.utc).isoformat()
                 else:
                     # New file created in mounted folder
-                    cat = full_p.parent.name if full_p.parent != path_obj else "Documents"
-                    item_id = cls.add_file_item(vault_data, str(full_p), category=cat)
+                    item_id = cls.add_file_item(vault_data, str(full_p), category=cat, rel_path=rel_p)
                     index_map[rel_p] = item_id
+
+        # Preserve created directories (even if empty)
+        vault_data["folders"] = list(scanned_rel_folders)
 
         # Handle deleted files
         for rel_p, item_id in list(index_map.items()):
