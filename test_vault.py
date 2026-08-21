@@ -1,8 +1,7 @@
 import os
 import unittest
 import tempfile
-from pathlib import Path
-from vault_core import VaultCore, VaultSecurityError, KDF_ARGON2ID, KDF_PBKDF2
+from vault_core import VaultCore, VaultSecurityError
 
 
 class TestVaultCore(unittest.TestCase):
@@ -113,7 +112,7 @@ class TestVaultCore(unittest.TestCase):
         note_id = VaultCore.add_note_item(vault_data, "TestNote", "Initial Content")
 
         mount_dir = os.path.join(self.temp_dir.name, "test_mount")
-        index_map = VaultCore.mount_vault_to_dir(vault_data, mount_dir)
+        VaultCore.mount_vault_to_dir(vault_data, mount_dir)
         self.assertTrue(os.path.exists(mount_dir))
 
         # Check extracted file content

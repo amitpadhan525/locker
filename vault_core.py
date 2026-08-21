@@ -2,7 +2,6 @@ import os
 import json
 import base64
 import uuid
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
@@ -130,6 +129,8 @@ class VaultCore:
             raise VaultSecurityError("Invalid vault header. File is not a recognized vault format.")
 
         version = int.from_bytes(content[8:10], byteorder='big')
+        if version > VERSION:
+            raise VaultSecurityError(f"Unsupported vault format version ({version}).")
         kdf_type = content[10]
         salt = content[11:27]
         nonce = content[27:39]
@@ -146,7 +147,7 @@ class VaultCore:
             decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, MAGIC_HEADER)
             vault_data = json.loads(decrypted_bytes.decode('utf-8'))
             return master_key, salt, kdf_type, vault_data
-        except Exception as e:
+        except Exception:
             raise VaultSecurityError("Invalid master password or corrupted ciphertext tag verification failed.")
 
     @classmethod

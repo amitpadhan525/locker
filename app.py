@@ -5,11 +5,9 @@ Locker - Encrypted Storage Vault & Virtual Drive Mount
 Zero Cloud Access, Zero HTTP Server, Zero Open Ports.
 """
 
-import sys
 import os
 import re
 import time
-import json
 import base64
 import random
 import string
@@ -62,7 +60,7 @@ def add_gtk_bookmark(path: str, label: str):
             if os.path.exists(bm_file):
                 with open(bm_file, "r", encoding="utf-8") as f:
                     lines = f.readlines()
-            if not any(uri in l for l in lines):
+            if not any(uri in line for line in lines):
                 lines.append(line_to_add)
                 with open(bm_file, "w", encoding="utf-8") as f:
                     f.writelines(lines)
@@ -79,7 +77,7 @@ def remove_gtk_bookmark(path: str):
             if os.path.exists(bm_file):
                 with open(bm_file, "r", encoding="utf-8") as f:
                     lines = f.readlines()
-                new_lines = [l for l in lines if uri not in l]
+                new_lines = [line for line in lines if uri not in line]
                 with open(bm_file, "w", encoding="utf-8") as f:
                     f.writelines(new_lines)
     except Exception as e:

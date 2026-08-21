@@ -24,13 +24,13 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Subcommand to execute")
 
     # init
-    init_parser = subparsers.add_parser("init", help="Initialize a new encrypted vault")
-    
+    subparsers.add_parser("init", help="Initialize a new encrypted vault")
+
     # status
     subparsers.add_parser("status", help="Check status of the vault file")
 
     # list
-    list_parser = subparsers.add_parser("list", help="List all items in the vault")
+    subparsers.add_parser("list", help="List all items in the vault")
 
     # add-file
     add_file_parser = subparsers.add_parser("add-file", help="Encrypt and add a file to the vault")

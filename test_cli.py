@@ -4,9 +4,7 @@ import unittest
 import tempfile
 import io
 from unittest.mock import patch
-from pathlib import Path
 
-from vault_core import VaultCore, DEFAULT_VAULT_FILE
 import cli
 
 
