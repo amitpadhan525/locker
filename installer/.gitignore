@@ -1,0 +1,15 @@
+# Temporary Build & Packaging Artifacts
+*.exe
+*.msi
+*.AppImage
+*.deb
+*.rpm
+*.zip
+*.tar.gz
+*.tmp
+
+# Virtual Environment & Local State
+venv/
+.venv/
+__pycache__/
+*.pyc
