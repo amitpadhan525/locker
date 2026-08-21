@@ -19,7 +19,7 @@ import platform
 import shutil
 import getpass
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
