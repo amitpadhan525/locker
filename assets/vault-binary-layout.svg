@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 320" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="payloadGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#db2777"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1000" height="320" rx="12" fill="url(#bgGrad)" stroke="#334155" stroke-width="2"/>
+
+  <!-- Title -->
+  <text x="30" y="45" font-family="sans-serif" font-size="22" font-weight="800" fill="#f8fafc">
+    Locker Container Format Specification (.vault / .locker)
+  </text>
+  <text x="30" y="70" font-family="sans-serif" font-size="14" fill="#94a3b8">
+    47-Byte Binary Fixed Header + AES-256-GCM Authenticated Ciphertext &amp; Auth Tag
+  </text>
+
+  <!-- Header Container Group -->
+  <g transform="translate(30, 95)">
+    <!-- Header Block Base -->
+    <rect x="0" y="0" width="460" height="90" rx="8" fill="#1e293b" stroke="#38bdf8" stroke-width="2"/>
+    <text x="15" y="-10" font-family="sans-serif" font-size="13" font-weight="700" fill="#38bdf8">
+      BINARY HEADER (47 Bytes Total)
+    </text>
+
+    <!-- Field 1: Magic Header (8B) -->
+    <g transform="translate(10, 15)">
+      <rect width="80" height="60" rx="6" fill="url(#headerGrad)"/>
+      <text x="40" y="32" font-family="monospace" font-size="13" font-weight="800" fill="#fff" text-anchor="middle">SECVAULT</text>
+      <text x="40" y="50" font-family="sans-serif" font-size="10" fill="#e0f2fe" text-anchor="middle">Magic (8B)</text>
+    </g>
+
+    <!-- Field 2: Version (2B) -->
+    <g transform="translate(98, 15)">
+      <rect width="60" height="60" rx="6" fill="#0f172a" stroke="#0284c7" stroke-width="1.5"/>
+      <text x="30" y="32" font-family="monospace" font-size="14" font-weight="700" fill="#38bdf8" text-anchor="middle">v1</text>
+      <text x="30" y="50" font-family="sans-serif" font-size="10" fill="#94a3b8" text-anchor="middle">Ver (2B)</text>
+    </g>
+
+    <!-- Field 3: KDF Type (1B) -->
+    <g transform="translate(166, 15)">
+      <rect width="60" height="60" rx="6" fill="#0f172a" stroke="#a855f7" stroke-width="1.5"/>
+      <text x="30" y="32" font-family="monospace" font-size="14" font-weight="700" fill="#c084fc" text-anchor="middle">0x01</text>
+      <text x="30" y="50" font-family="sans-serif" font-size="10" fill="#94a3b8" text-anchor="middle">KDF (1B)</text>
+    </g>
+
+    <!-- Field 4: Salt (16B) -->
+    <g transform="translate(234, 15)">
+      <rect width="70" height="60" rx="6" fill="#0f172a" stroke="#0284c7" stroke-width="1.5"/>
+      <text x="35" y="32" font-family="monospace" font-size="12" font-weight="700" fill="#38bdf8" text-anchor="middle">128-bit</text>
+      <text x="35" y="50" font-family="sans-serif" font-size="10" fill="#94a3b8" text-anchor="middle">Salt (16B)</text>
+    </g>
+
+    <!-- Field 5: Nonce (12B) -->
+    <g transform="translate(312, 15)">
+      <rect width="65" height="60" rx="6" fill="#0f172a" stroke="#0284c7" stroke-width="1.5"/>
+      <text x="32" y="32" font-family="monospace" font-size="12" font-weight="700" fill="#38bdf8" text-anchor="middle">96-bit</text>
+      <text x="32" y="50" font-family="sans-serif" font-size="10" fill="#94a3b8" text-anchor="middle">Nonce (12B)</text>
+    </g>
+
+    <!-- Field 6: Len (8B) -->
+    <g transform="translate(385, 15)">
+      <rect width="65" height="60" rx="6" fill="#0f172a" stroke="#0284c7" stroke-width="1.5"/>
+      <text x="32" y="32" font-family="monospace" font-size="12" font-weight="700" fill="#38bdf8" text-anchor="middle">uint64</text>
+      <text x="32" y="50" font-family="sans-serif" font-size="10" fill="#94a3b8" text-anchor="middle">Len (8B)</text>
+    </g>
+  </g>
+
+  <!-- Payload Group -->
+  <g transform="translate(510, 95)">
+    <rect width="460" height="90" rx="8" fill="#1e293b" stroke="#c084fc" stroke-width="2"/>
+    <text x="15" y="-10" font-family="sans-serif" font-size="13" font-weight="700" fill="#c084fc">
+      AUTHENTICATED ENCRYPTED PAYLOAD
+    </text>
+
+    <!-- Payload Content -->
+    <g transform="translate(15, 15)">
+      <rect width="310" height="60" rx="6" fill="url(#payloadGrad)"/>
+      <text x="155" y="32" font-family="sans-serif" font-size="14" font-weight="800" fill="#fff" text-anchor="middle">
+        AES-256-GCM Ciphertext (JSON Vault Data)
+      </text>
+      <text x="155" y="50" font-family="sans-serif" font-size="10" fill="#fbcfe8" text-anchor="middle">
+        Variable Byte Length (n bytes)
+      </text>
+    </g>
+
+    <!-- GCM Auth Tag -->
+    <g transform="translate(335, 15)">
+      <rect width="110" height="60" rx="6" fill="#0f172a" stroke="#f43f5e" stroke-width="1.5"/>
+      <text x="55" y="32" font-family="monospace" font-size="13" font-weight="800" fill="#f43f5e" text-anchor="middle">16B TAG</text>
+      <text x="55" y="50" font-family="sans-serif" font-size="10" fill="#94a3b8" text-anchor="middle">Auth Verification</text>
+    </g>
+  </g>
+
+  <!-- Bottom Explanatory Row -->
+  <g transform="translate(30, 220)">
+    <rect width="940" height="70" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="30" font-family="sans-serif" font-size="13" font-weight="700" fill="#38bdf8">
+      Key Derivation: Argon2id (m=64MB, t=2, p=4) derives 256-bit AES master key from Master Password + Salt.
+    </text>
+    <text x="20" y="52" font-family="sans-serif" font-size="13" font-weight="700" fill="#22c55e">
+      Tamper Protection: AES-GCM MAC tag checks payload integrity. Bit-flip or corruption prevents decryption instantly.
+    </text>
+  </g>
+</svg>

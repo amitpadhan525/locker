@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 420" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <rect width="1000" height="420" rx="12" fill="url(#bgGrad)" stroke="#334155" stroke-width="2"/>
+
+  <!-- Title -->
+  <text x="30" y="45" font-family="sans-serif" font-size="22" font-weight="800" fill="#f8fafc">
+    Locker Zero-Knowledge Lifecycle &amp; Virtual Drive Mount Sequence
+  </text>
+  <text x="30" y="70" font-family="sans-serif" font-size="14" fill="#94a3b8">
+    RAM-Only Encryption, OS File Manager Integration, and Zero-Leak Memory Wiping
+  </text>
+
+  <!-- Flow Boxes -->
+  <!-- Step 1: User Auth -->
+  <g transform="translate(40, 110)" filter="url(#shadow)">
+    <rect width="200" height="150" rx="10" fill="#1e293b" stroke="#38bdf8" stroke-width="2"/>
+    <rect x="0" y="0" width="200" height="32" rx="10" fill="#0284c7"/>
+    <text x="100" y="21" font-family="sans-serif" font-size="13" font-weight="800" fill="#fff" text-anchor="middle">1. Unlock Request</text>
+    
+    <text x="15" y="60" font-family="sans-serif" font-size="12" fill="#cbd5e1">• Master Password</text>
+    <text x="15" y="80" font-family="sans-serif" font-size="12" fill="#cbd5e1">• Reads Header Salt</text>
+    <text x="15" y="100" font-family="sans-serif" font-size="12" fill="#38bdf8">• Argon2id Memory</text>
+    <text x="15" y="120" font-family="sans-serif" font-size="12" fill="#38bdf8">  Derivation (64MB)</text>
+  </g>
+
+  <!-- Arrow 1 -->
+  <path d="M 245 185 L 285 185" stroke="#64748b" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+
+  <!-- Step 2: RAM Decryption -->
+  <g transform="translate(290, 110)" filter="url(#shadow)">
+    <rect width="200" height="150" rx="10" fill="#1e293b" stroke="#a855f7" stroke-width="2"/>
+    <rect x="0" y="0" width="200" height="32" rx="10" fill="#7c3aed"/>
+    <text x="100" y="21" font-family="sans-serif" font-size="13" font-weight="800" fill="#fff" text-anchor="middle">2. In-Memory Session</text>
+    
+    <text x="15" y="60" font-family="sans-serif" font-size="12" fill="#cbd5e1">• AES-256-GCM Tag</text>
+    <text x="15" y="80" font-family="sans-serif" font-size="12" fill="#cbd5e1">• Decrypts JSON Data</text>
+    <text x="15" y="100" font-family="sans-serif" font-size="12" fill="#c084fc">• RAM-only state</text>
+    <text x="15" y="120" font-family="sans-serif" font-size="12" fill="#c084fc">• 15-min auto-lock timer</text>
+  </g>
+
+  <!-- Arrow 2 -->
+  <path d="M 495 185 L 535 185" stroke="#64748b" stroke-width="3" fill="none"/>
+
+  <!-- Step 3: Virtual Mount -->
+  <g transform="translate(540, 110)" filter="url(#shadow)">
+    <rect width="200" height="150" rx="10" fill="#1e293b" stroke="#22c55e" stroke-width="2"/>
+    <rect x="0" y="0" width="200" height="32" rx="10" fill="#16a34a"/>
+    <text x="100" y="21" font-family="sans-serif" font-size="13" font-weight="800" fill="#fff" text-anchor="middle">3. Virtual Drive Mount</text>
+    
+    <text x="15" y="60" font-family="sans-serif" font-size="12" fill="#cbd5e1">• Mounts target (0700)</text>
+    <text x="15" y="80" font-family="sans-serif" font-size="12" fill="#cbd5e1">• GTK sidebar bookmark</text>
+    <text x="15" y="100" font-family="sans-serif" font-size="12" fill="#4ade80">• Native File Manager</text>
+    <text x="15" y="120" font-family="sans-serif" font-size="12" fill="#4ade80">• Automatic re-indexing</text>
+  </g>
+
+  <!-- Arrow 3 -->
+  <path d="M 745 185 L 785 185" stroke="#64748b" stroke-width="3" fill="none"/>
+
+  <!-- Step 4: Unmount & Shred -->
+  <g transform="translate(790, 110)" filter="url(#shadow)">
+    <rect width="200" height="150" rx="10" fill="#1e293b" stroke="#ef4444" stroke-width="2"/>
+    <rect x="0" y="0" width="200" height="32" rx="10" fill="#dc2626"/>
+    <text x="100" y="21" font-family="sans-serif" font-size="13" font-weight="800" fill="#fff" text-anchor="middle">4. Secure Lock &amp; Shred</text>
+    
+    <text x="15" y="60" font-family="sans-serif" font-size="12" fill="#cbd5e1">• Re-encrypts container</text>
+    <text x="15" y="80" font-family="sans-serif" font-size="12" fill="#fca5a5">• 0x00 Shred Byte Wipe</text>
+    <text x="15" y="100" font-family="sans-serif" font-size="12" fill="#fca5a5">• Removes GTK Sidebar</text>
+    <text x="15" y="120" font-family="sans-serif" font-size="12" fill="#fca5a5">• Clears RAM Key Material</text>
+  </g>
+
+  <!-- Bottom Banner Feature Highlight -->
+  <g transform="translate(40, 290)">
+    <rect width="920" height="95" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+    <text x="25" y="32" font-family="sans-serif" font-size="14" font-weight="800" fill="#38bdf8">
+      Zero-Cloud Guarantee:
+    </text>
+    <text x="180" y="32" font-family="sans-serif" font-size="13" fill="#e2e8f0">
+      0 open network ports, 0 outbound HTTP connections, 0 telemetry tracking.
+    </text>
+
+    <text x="25" y="60" font-family="sans-serif" font-size="14" font-weight="800" fill="#a855f7">
+      Atomic Persistence:
+    </text>
+    <text x="180" y="60" font-family="sans-serif" font-size="13" fill="#e2e8f0">
+      Saves occur via atomic temporary file creation (<tspan font-family="monospace">.vault.tmp</tspan>) and atomic OS file replacement (<tspan font-family="monospace">os.replace</tspan>).
+    </text>
+
+    <text x="25" y="85" font-family="sans-serif" font-size="14" font-weight="800" fill="#22c55e">
+      Cross-Platform:
+    </text>
+    <text x="180" y="85" font-family="sans-serif" font-size="13" fill="#e2e8f0">
+      Native support for Linux (Desktop entry + GTK bookmark), Windows (Registry association), and macOS.
+    </text>
+  </g>
+</svg>
