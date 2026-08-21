@@ -1,0 +1,19 @@
+- name: 'good first issue'
+  color: '7057ff'
+  description: 'Good for newcomers and first-time open source contributors'
+
+- name: 'help wanted'
+  color: '008672'
+  description: 'Extra attention or community contribution needed'
+
+- name: 'security'
+  color: 'd93f0b'
+  description: 'Cryptographic primitives, threat model, or memory lifecycle'
+
+- name: 'documentation'
+  color: '0075ca'
+  description: 'Improvements or additions to documentation and guides'
+
+- name: 'testing'
+  color: 'd4c5f9'
+  description: 'Unit tests, CLI coverage, and edge-case validation'

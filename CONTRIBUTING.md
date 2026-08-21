@@ -6,37 +6,48 @@ Because Locker handles user security and encrypted data, all contributions must 
 
 ---
 
-## 🛠️ Development Setup
+## ⚡ Quick Start: Clone & Run Locker in 60 Seconds
 
-### Prerequisites
-- **Python 3.8+** installed.
-- **Git** installed.
-- Linux, macOS, or Windows workstation.
+Get up and running locally with three simple commands:
 
-### Step-by-step Setup
+```bash
+# 1. Clone the repository
+git clone https://github.com/amitpadhan525/locker.git
+cd locker
 
-1. **Fork & Clone the Repository**:
-   ```bash
-   git clone https://github.com/<YOUR_USERNAME>/locker.git
-   cd locker
-   ```
+# 2. Create virtual environment & install dependencies
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install cryptography pyperclip pytest coverage flake8
 
-2. **Create a Virtual Environment**:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+# 3. Run Locker Desktop GUI or CLI
+python3 app.py        # Launch Desktop GUI Application
+python3 cli.py status # Run Command Line Interface
+```
 
-3. **Install Dependencies**:
-   ```bash
-   pip install --upgrade pip
-   pip install cryptography pyperclip pytest coverage flake8 black
-   ```
+### Run the Test Suite
 
-4. **Run Existing Test Suite**:
-   ```bash
-   python3 -m unittest test_vault.py
-   ```
+Verify that your local environment is functioning correctly:
+
+```bash
+python3 -m unittest discover -p "test_*.py"
+```
+
+---
+
+## 🏷️ Issue Labels Guide
+
+We organize tasks on GitHub using standardized issue labels:
+
+| Label | Description | Color |
+|---|---|---|
+| `good first issue` | Beginner-friendly tasks with clear instructions and code pointers. | `#7057ff` (Purple) |
+| `help wanted` | Tasks seeking community contributions or specialized expertise. | `#008672` (Teal) |
+| `security` | Cryptographic primitives, threat model, or memory lifecycle tasks. | `#d93f0b` (Red-Orange) |
+| `documentation` | README, ARCHITECTURE, comments, or docstring improvements. | `#0075ca` (Blue) |
+| `testing` | Unit test suite, CLI test coverage, or edge-case validation. | `#d4c5f9` (Light Purple) |
+
+See [**ISSUES.md**](ISSUES.md) for a curated list of open tasks tagged with these labels!
 
 ---
 
@@ -54,7 +65,7 @@ When writing code for Locker, you **MUST** follow these core security rules:
 
 ## 📐 Coding Standards & Conventions
 
-- **PEP 8 Compliance**: Follow standard Python style guidelines. Limit line length to 100-120 characters where readable.
+- **PEP 8 Compliance**: Follow standard Python style guidelines. Limit line length to 120 characters where readable.
 - **Type Annotations**: Add type hints (`from typing import Optional, Dict, Tuple, Any`) for function arguments and return types.
 - **Docstrings**: Document public functions, classes, and subcommands clearly.
 - **Error Handling**: Use explicit exceptions (`VaultSecurityError`, `ValueError`, `FileNotFoundError`). Never catch raw `Exception` silently without rationale.
@@ -105,8 +116,8 @@ Every pull request that modifies logic or adds features **must** include corresp
 
 Before submitting your PR, ensure:
 
-- [ ] Code passes PEP 8 linting (`flake8` / `black`).
-- [ ] All unit tests pass (`python3 -m unittest discover`).
+- [ ] Code passes PEP 8 linting (`flake8`).
+- [ ] All unit tests pass (`python3 -m unittest discover -p "test_*.py"`).
 - [ ] No security guidelines or offline constraints are violated.
 - [ ] Documentation has been updated for new features or CLI options.
 - [ ] PR description clearly explains the changes made.
